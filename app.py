@@ -842,6 +842,70 @@ def format_ratio(value: float) -> str:
     return f"{value * 100:.1f}%"
 
 
+def format_amount_with_unit(value: float, unit: str) -> str:
+    """金額値を単位付きで整形（無効値はダッシュ）。"""
+
+    formatted = format_money(value, unit)
+    return formatted if formatted == "—" else f"{formatted} {unit}"
+
+
+def render_sidebar_overview(
+    amounts: Dict[str, float],
+    unit: str,
+    fiscal_year: int,
+    overrides: Dict[str, float] | None = None,
+) -> None:
+    """サイドバーに基準値のサマリーと操作ガイドを提示。"""
+
+    metrics = summarize_plan_metrics(amounts)
+    overrides = overrides or {}
+
+    be_value = metrics.get("breakeven", float("nan"))
+    if isinstance(be_value, (int, float)) and math.isfinite(be_value):
+        be_display = format_amount_with_unit(be_value, unit)
+    else:
+        be_display = "∞"
+
+    sidebar = st.sidebar
+    sidebar.markdown("### 🧾 クイックサマリー")
+    sidebar.caption("ベースプランの主要指標を常にウォッチできます。")
+
+    summary_box = sidebar.container(border=True)
+    top_cols = summary_box.columns(2)
+    with top_cols[0]:
+        st.metric("売上高（目標）", format_amount_with_unit(metrics.get("sales", 0.0), unit))
+    with top_cols[1]:
+        st.metric("経常利益（目標）", format_amount_with_unit(metrics.get("ord", 0.0), unit))
+
+    mid_cols = summary_box.columns(2)
+    with mid_cols[0]:
+        st.metric("粗利率", format_ratio(metrics.get("gross_margin")))
+    with mid_cols[1]:
+        st.metric("経常利益率", format_ratio(metrics.get("ord_margin")))
+
+    bottom_cols = summary_box.columns(2)
+    with bottom_cols[0]:
+        st.metric("損益分岐点売上高", be_display)
+    with bottom_cols[1]:
+        st.metric("労働分配率", format_ratio(metrics.get("labor_ratio")))
+
+    summary_box.caption(f"対象会計年度: FY{fiscal_year}")
+    fixed_count = sum(1 for v in overrides.values() if v > 0)
+    if fixed_count:
+        summary_box.caption(f"固定額上書き: {fixed_count}項目が適用中（シナリオ/エクスポートに反映）。")
+
+    sidebar.markdown(" ")
+
+    flow_box = sidebar.container(border=True)
+    flow_box.markdown("#### 操作のながれ")
+    flow_box.markdown(
+        "- **1. コントロールハブ**: 売上・費用レバーを設定\n"
+        "- **2. シナリオ / 感応度**: 変動要因を比較・検証\n"
+        "- **3. AIインサイト & エクスポート**: レビュー結果を共有"
+    )
+    flow_box.caption("タブ間を移動しても入力内容はセッション中に保持されます。")
+
+
 def generate_ai_recommendations(
     metrics: Dict[str, float],
     numeric_amounts: pd.DataFrame | None,
@@ -935,7 +999,7 @@ def generate_ai_recommendations(
             if best_col and best_diff > 0:
                 insights.append({
                     "title": f"最有力シナリオ：{best_col}",
-                    "body": f"ベース比で経常利益を{format_money(best_diff, unit)} {unit}押し上げます。主要ドライバを戦略課題に落とし込みましょう。",
+                    "body": f"ベース比で経常利益を{format_amount_with_unit(best_diff, unit)}押し上げます。主要ドライバを戦略課題に落とし込みましょう。",
                     "tone": "positive",
                 })
 
@@ -978,11 +1042,11 @@ def detect_anomalies_in_plan(
         anomalies.append({"カテゴリ": category, "対象": target, "値": value, "判定": judgement, "コメント": comment})
 
     if base_gross <= 0:
-        record("損益", "粗利（目標）", f"{format_money(base_gross, unit)} {unit}", "🚨 粗利が不足", "売上より費用が先行しています。可変費率の再点検が必要です。")
+        record("損益", "粗利（目標）", format_amount_with_unit(base_gross, unit), "🚨 粗利が不足", "売上より費用が先行しています。可変費率の再点検が必要です。")
     if base_op < 0:
-        record("損益", "営業利益（目標）", f"{format_money(base_op, unit)} {unit}", "🚨 赤字リスク", "営業利益がマイナスです。固定費の削減や高粗利案件へのシフトを優先してください。")
+        record("損益", "営業利益（目標）", format_amount_with_unit(base_op, unit), "🚨 赤字リスク", "営業利益がマイナスです。固定費の削減や高粗利案件へのシフトを優先してください。")
     if base_ord < 0:
-        record("損益", "経常利益（目標）", f"{format_money(base_ord, unit)} {unit}", "🚨 経常赤字", "営業外損益も含め赤字レンジです。財務・本業双方のてこ入れが求められます。")
+        record("損益", "経常利益（目標）", format_amount_with_unit(base_ord, unit), "🚨 経常赤字", "営業外損益も含め赤字レンジです。財務・本業双方のてこ入れが求められます。")
 
     gm = metrics.get("gross_margin")
     if gm is not None and math.isfinite(gm) and gm < 0.2:
@@ -999,7 +1063,7 @@ def detect_anomalies_in_plan(
         record("コスト構造", "外部仕入比率", format_ratio(cogs_ratio), "⚠️ コスト高止まり", "仕入費用が売上の80%超です。サプライヤー交渉やポートフォリオ見直しが必要です。")
 
     if be_sales and sales and math.isfinite(be_sales) and be_sales > sales * 0.95:
-        record("安全余裕", "損益分岐点売上", f"{format_money(be_sales, unit)} {unit}", "⚠️ 余裕が僅少", "損益分岐点が現計画売上の95%超です。固定費圧縮で安全マージンを確保しましょう。")
+        record("安全余裕", "損益分岐点売上", format_amount_with_unit(be_sales, unit), "⚠️ 余裕が僅少", "損益分岐点が現計画売上の95%超です。固定費圧縮で安全マージンを確保しましょう。")
 
     if numeric_amounts is not None and "ORD" in numeric_amounts.index and len(value_cols) > 1:
         base_ord_value = float(numeric_amounts.loc["ORD", base_col])
@@ -1011,17 +1075,17 @@ def detect_anomalies_in_plan(
                 record(
                     "シナリオ",
                     f"{col}｜経常利益",
-                    f"{format_money(scn_value, unit)} {unit}",
+                    format_amount_with_unit(scn_value, unit),
                     "🚨 大幅悪化",
-                    f"ベース比で{format_money(abs(diff), unit)} {unit}の減益です。前提条件の見直しが必要です。",
+                    f"ベース比で{format_amount_with_unit(abs(diff), unit)}の減益です。前提条件の見直しが必要です。",
                 )
             elif diff >= 0.5 * baseline:
                 record(
                     "シナリオ",
                     f"{col}｜経常利益",
-                    f"{format_money(scn_value, unit)} {unit}",
+                    format_amount_with_unit(scn_value, unit),
                     "✅ 大幅改善",
-                    f"ベース比で{format_money(diff, unit)} {unit}増益です。実現可能性と投資アクションを検証しましょう。",
+                    f"ベース比で{format_amount_with_unit(diff, unit)}増益です。実現可能性と投資アクションを検証しましょう。",
                 )
 
     if numeric_kpis is not None and not numeric_kpis.empty and "LDR" in numeric_kpis.index and len(value_cols) > 1:
@@ -1600,6 +1664,10 @@ apply_setting("NOI_OTH", noi_oth_input)
 apply_setting("NOE_INT", noe_int_input)
 apply_setting("NOE_OTH", noe_oth_input)
 
+sidebar_overrides = st.session_state.get("overrides", {})
+sidebar_amounts = compute(base_plan)
+render_sidebar_overview(sidebar_amounts, unit, fiscal_year, sidebar_overrides)
+
 tab_input, tab_scen, tab_analysis, tab_ai, tab_export = st.tabs(
     ["📝 計画入力", "🧪 シナリオ", "📊 感応度分析", "🤖 AIインサイト", "📤 エクスポート"]
 )
@@ -1607,179 +1675,209 @@ tab_input, tab_scen, tab_analysis, tab_ai, tab_export = st.tabs(
 with tab_input:
     st.subheader("単年利益計画（目標列）")
     base_amt = compute(base_plan)
+    metrics_view = summarize_plan_metrics(base_amt)
 
-    def fmt_amount_with_unit(value: float) -> str:
-        formatted = format_money(value, base_plan.unit)
-        return formatted if formatted == "—" else f"{formatted} {base_plan.unit}"
+    with st.container(border=True):
+        st.markdown("### KPIスナップショット")
+        st.caption("設定中のベースプランを即時に俯瞰できるサマリーです。")
+        top_cols = st.columns(4)
+        with top_cols[0]:
+            st.metric("売上高", format_amount_with_unit(base_amt["REV"], base_plan.unit))
+        with top_cols[1]:
+            st.metric("粗利(加工高)", format_amount_with_unit(base_amt["GROSS"], base_plan.unit))
+        with top_cols[2]:
+            st.metric("営業利益", format_amount_with_unit(base_amt["OP"], base_plan.unit))
+        with top_cols[3]:
+            st.metric("経常利益", format_amount_with_unit(base_amt["ORD"], base_plan.unit))
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("売上高", fmt_amount_with_unit(base_amt["REV"]))
-    c2.metric("粗利(加工高)", fmt_amount_with_unit(base_amt["GROSS"]))
-    c3.metric("営業利益", fmt_amount_with_unit(base_amt["OP"]))
-    c4.metric("経常利益", fmt_amount_with_unit(base_amt["ORD"]))
-    be_label = "∞" if not math.isfinite(base_amt["BE_SALES"]) else fmt_amount_with_unit(base_amt["BE_SALES"])
-    c5.metric("損益分岐点売上高", be_label)
+        be_value = base_amt["BE_SALES"]
+        be_label = "∞" if not math.isfinite(be_value) else format_amount_with_unit(be_value, base_plan.unit)
+        detail_cols = st.columns(4)
+        with detail_cols[0]:
+            st.metric("損益分岐点売上高", be_label)
+        with detail_cols[1]:
+            st.metric("一人当たり売上", format_amount_with_unit(base_amt["PC_SALES"], base_plan.unit))
+        with detail_cols[2]:
+            st.metric("一人当たり粗利", format_amount_with_unit(base_amt["PC_GROSS"], base_plan.unit))
+        with detail_cols[3]:
+            st.metric("一人当たり経常利益", format_amount_with_unit(base_amt["PC_ORD"], base_plan.unit))
 
-    c6, c7, c8 = st.columns(3)
-    c6.metric("一人当たり売上", fmt_amount_with_unit(base_amt["PC_SALES"]))
-    c7.metric("一人当たり粗利", fmt_amount_with_unit(base_amt["PC_GROSS"]))
-    ldr = base_amt["LDR"]
-    ldr_str = "—" if (ldr is None or not math.isfinite(ldr)) else f"{ldr*100:.0f}%"
-    c8.metric("労働分配率", ldr_str)
+        ratio_cols = st.columns(3)
+        with ratio_cols[0]:
+            st.metric("粗利率", format_ratio(metrics_view.get("gross_margin")))
+        with ratio_cols[1]:
+            st.metric("経常利益率", format_ratio(metrics_view.get("ord_margin")))
+        with ratio_cols[2]:
+            st.metric("労働分配率", format_ratio(metrics_view.get("labor_ratio")))
+        st.caption(f"表示単位: {base_plan.unit} ｜ FTE: {base_plan.fte:.1f}人")
 
-    st.markdown("### 標準原価の見える化（中央ビュー）")
-    st.caption("コントロールハブで設定した原価や費用がリアルタイムに反映され、売上に対するインパクトを一目で確認できます。")
+    with st.container(border=True):
+        st.markdown("### 標準原価の見える化（中央ビュー）")
+        st.caption("コントロールハブで設定した原価や費用がリアルタイムに反映され、売上に対するインパクトを一目で確認できます。")
 
-    revenue = float(base_amt.get("REV", 0.0))
-    cost_cards = []
-    for code, label, desc, extra_class in COST_PILL_ITEMS:
-        value = float(base_amt.get(code, 0.0) or 0.0)
-        ratio = value / revenue if revenue else float("nan")
-        cost_cards.append({
-            "code": code,
-            "label": label,
-            "desc": desc,
-            "value": value,
-            "ratio": ratio,
-            "class": extra_class,
-        })
+        revenue = float(base_amt.get("REV", 0.0))
+        cost_cards = []
+        for code, label, desc, extra_class in COST_PILL_ITEMS:
+            value = float(base_amt.get(code, 0.0) or 0.0)
+            ratio = value / revenue if revenue else float("nan")
+            cost_cards.append(
+                {
+                    "code": code,
+                    "label": label,
+                    "desc": desc,
+                    "value": value,
+                    "ratio": ratio,
+                    "class": extra_class,
+                }
+            )
 
-    pill_columns = st.columns(3)
-    for idx, card in enumerate(cost_cards):
-        col = pill_columns[idx % 3]
-        ratio_text = format_ratio(card["ratio"])
-        amount_text = fmt_amount_with_unit(card["value"])
-        pill_class = "cost-pill"
-        if card["class"]:
-            pill_class = f"{pill_class} {card['class']}"
-        pill_html = (
-            f"<div class='{pill_class}'>"
-            f"<strong>{card['label']}</strong>"
-            f"<span>{amount_text}</span>"
-            f"<small>{ratio_text} ／ {card['desc']}</small>"
-            "</div>"
-        )
-        col.markdown(pill_html, unsafe_allow_html=True)
+        pill_columns = st.columns(3)
+        for idx, card in enumerate(cost_cards):
+            col = pill_columns[idx % 3]
+            ratio_text = format_ratio(card["ratio"])
+            amount_text = format_amount_with_unit(card["value"], base_plan.unit)
+            pill_class = "cost-pill"
+            if card["class"]:
+                pill_class = f"{pill_class} {card['class']}"
+            pill_html = (
+                f"<div class='{pill_class}'>"
+                f"<strong>{card['label']}</strong>"
+                f"<span>{amount_text}</span>"
+                f"<small>{ratio_text} ／ {card['desc']}</small>"
+                "</div>"
+            )
+            col.markdown(pill_html, unsafe_allow_html=True)
 
-    cost_chart_cards = [
-        card
-        for card in cost_cards
-        if card["code"] in {"COGS_MAT", "COGS_LBR", "COGS_OUT_SRC", "COGS_OUT_CON", "COGS_OTH"}
-    ]
-    if revenue > 0 and any(card["value"] > 0 for card in cost_chart_cards):
-        names = [card["label"] for card in cost_chart_cards]
-        shares = [max(0.0, card["ratio"]) * 100 if math.isfinite(card["ratio"]) else 0.0 for card in cost_chart_cards]
-        max_share = max(shares) if shares else 0.0
-        slider_min = 5.0
-        slider_max = max(
-            slider_min + 5.0,
-            (math.ceil(max_share * 1.6 / 5.0) * 5.0) if max_share > 0 else 30.0,
-        )
-        default_limit = max(
-            slider_min + 5.0,
-            (math.ceil(max_share * 1.2 / 5.0) * 5.0) if max_share > 0 else 25.0,
-        )
-        share_axis_max = st.slider(
-            "表示上限（%）",
-            min_value=float(slider_min),
-            max_value=float(slider_max),
-            value=float(min(default_limit, slider_max)),
-            step=1.0,
-            key="cost_share_axis",
-            help="棒グラフ右端のスケールをコントロールできます。",
-        )
-
-        colors = [THEME_COLORS["primary_light"] if i % 2 == 0 else THEME_COLORS["primary"] for i in range(len(names))]
-        hover_details = [
-            f"{format_ratio(card['ratio'])} ／ {fmt_amount_with_unit(card['value'])}"
-            for card in cost_chart_cards
+        cost_chart_cards = [
+            card
+            for card in cost_cards
+            if card["code"] in {"COGS_MAT", "COGS_LBR", "COGS_OUT_SRC", "COGS_OUT_CON", "COGS_OTH"}
         ]
-        fig_height = 120 + 70 * len(cost_chart_cards)
-        fig = go.Figure(
-            data=[
-                go.Bar(
-                    x=shares,
-                    y=names,
-                    orientation="h",
-                    marker=dict(
-                        color=colors,
-                        line=dict(color="rgba(31, 78, 121, 0.18)", width=1.4),
-                    ),
-                    text=[format_ratio(card["ratio"]) for card in cost_chart_cards],
-                    textposition="outside",
-                    textfont=dict(size=12, color=THEME_COLORS["text"]),
-                    customdata=hover_details,
-                    hovertemplate="<b>%{y}</b><br>売上比率: %{x:.1f}%<br>%{customdata}<extra></extra>",
-                    cliponaxis=False,
-                )
+        if revenue > 0 and any(card["value"] > 0 for card in cost_chart_cards):
+            names = [card["label"] for card in cost_chart_cards]
+            shares = [
+                max(0.0, card["ratio"]) * 100 if math.isfinite(card["ratio"]) else 0.0
+                for card in cost_chart_cards
             ]
-        )
-        fig.update_layout(
-            height=fig_height,
-            margin=dict(l=0, r=18, t=48, b=10),
-            bargap=0.25,
-            plot_bgcolor="#FFFFFF",
-            paper_bgcolor="#FFFFFF",
-            xaxis=dict(
-                title="売上比率（%）",
-                range=[0, share_axis_max],
-                showgrid=True,
-                gridcolor="#D4DEE9",
-                ticksuffix="%",
-                zeroline=False,
-                rangeslider=dict(visible=True, thickness=0.12, bgcolor="rgba(31, 78, 121, 0.08)"),
-            ),
-            yaxis=dict(autorange="reversed", showgrid=False),
-            hoverlabel=dict(bgcolor=THEME_COLORS["primary"], font=dict(color="#FFFFFF")),
-        )
-        st.plotly_chart(
-            fig,
+            max_share = max(shares) if shares else 0.0
+            slider_min = 5.0
+            slider_max = max(
+                slider_min + 5.0,
+                (math.ceil(max_share * 1.6 / 5.0) * 5.0) if max_share > 0 else 30.0,
+            )
+            default_limit = max(
+                slider_min + 5.0,
+                (math.ceil(max_share * 1.2 / 5.0) * 5.0) if max_share > 0 else 25.0,
+            )
+            share_axis_max = st.slider(
+                "表示上限（%）",
+                min_value=float(slider_min),
+                max_value=float(slider_max),
+                value=float(min(default_limit, slider_max)),
+                step=1.0,
+                key="cost_share_axis",
+                help="棒グラフ右端のスケールをコントロールできます。",
+            )
+
+            colors = [
+                THEME_COLORS["primary_light"] if i % 2 == 0 else THEME_COLORS["primary"]
+                for i in range(len(names))
+            ]
+            hover_details = [
+                f"{format_ratio(card['ratio'])} ／ {format_amount_with_unit(card['value'], base_plan.unit)}"
+                for card in cost_chart_cards
+            ]
+            fig_height = 120 + 70 * len(cost_chart_cards)
+            fig = go.Figure(
+                data=[
+                    go.Bar(
+                        x=shares,
+                        y=names,
+                        orientation="h",
+                        marker=dict(
+                            color=colors,
+                            line=dict(color="rgba(31, 78, 121, 0.18)", width=1.4),
+                        ),
+                        text=[format_ratio(card["ratio"]) for card in cost_chart_cards],
+                        textposition="outside",
+                        textfont=dict(size=12, color=THEME_COLORS["text"]),
+                        customdata=hover_details,
+                        hovertemplate="<b>%{y}</b><br>売上比率: %{x:.1f}%<br>%{customdata}<extra></extra>",
+                        cliponaxis=False,
+                    )
+                ]
+            )
+            fig.update_layout(
+                height=fig_height,
+                margin=dict(l=0, r=18, t=48, b=10),
+                bargap=0.25,
+                plot_bgcolor="#FFFFFF",
+                paper_bgcolor="#FFFFFF",
+                xaxis=dict(
+                    title="売上比率（%）",
+                    range=[0, share_axis_max],
+                    showgrid=True,
+                    gridcolor="#D4DEE9",
+                    ticksuffix="%",
+                    zeroline=False,
+                    rangeslider=dict(visible=True, thickness=0.12, bgcolor="rgba(31, 78, 121, 0.08)"),
+                ),
+                yaxis=dict(autorange="reversed", showgrid=False),
+                hoverlabel=dict(bgcolor=THEME_COLORS["primary"], font=dict(color="#FFFFFF")),
+            )
+            st.plotly_chart(
+                fig,
+                use_container_width=True,
+                config={
+                    "displaylogo": False,
+                    "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
+                    "toImageButtonOptions": {"filename": "standard-cost-breakdown"},
+                },
+            )
+            st.caption(
+                "横棒グラフは売上100に対し、それぞれの標準原価がどれだけを占めるかを示します。ズーム/パンに加え、スライダーで目盛りをコントロールできます。"
+            )
+
+        cost_table = [
+            {
+                "コスト項目": card["label"],
+                "売上比率": format_ratio(card["ratio"]),
+                "金額": format_amount_with_unit(card["value"], base_plan.unit),
+                "ひとことで": card["desc"],
+            }
+            for card in cost_cards
+        ]
+        st.dataframe(
+            pd.DataFrame(cost_table),
             use_container_width=True,
-            config={
-                "displaylogo": False,
-                "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
-                "toImageButtonOptions": {"filename": "standard-cost-breakdown"},
-            },
+            hide_index=True,
         )
         st.caption(
-            "横棒グラフは売上100に対し、それぞれの標準原価がどれだけを占めるかを示します。ズーム/パンに加え、スライダーで目盛りをコントロールできます。"
+            "カードと表はコントロールハブの入力に連動して更新されます。粗利（CT）と標準原価のバランスを中央ビューで確認してください。"
         )
 
-    cost_table = [
-        {
-            "コスト項目": card["label"],
-            "売上比率": format_ratio(card["ratio"]),
-            "金額": fmt_amount_with_unit(card["value"]),
-            "ひとことで": card["desc"],
-        }
-        for card in cost_cards
-    ]
-    st.dataframe(
-        pd.DataFrame(cost_table),
-        use_container_width=True,
-        hide_index=True,
-    )
-    st.caption("カードと表はコントロールハブの入力に連動して更新されます。粗利（CT）と標準原価のバランスを中央ビューで確認してください。")
-
-    st.markdown("### 主要項目（経営メモ付き）")
-    rows = []
-    for code, label, group in ITEMS:
-        if code in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES"):
-            continue
-        val = base_amt[code]
-        memo = PLAIN_LANGUAGE.get(code, "—")
-        rows.append({
-            "項目": label,
-            "経営メモ": memo,
-            "金額": fmt_amount_with_unit(val),
-        })
-    df = pd.DataFrame(rows)
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        height=min(520, 40 + 28 * len(rows)),
-    )
+    with st.container(border=True):
+        st.markdown("### 主要項目（経営メモ付き）")
+        rows = []
+        for code, label, group in ITEMS:
+            if code in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES"):
+                continue
+            val = base_amt[code]
+            memo = PLAIN_LANGUAGE.get(code, "—")
+            rows.append(
+                {
+                    "項目": label,
+                    "経営メモ": memo,
+                    "金額": format_amount_with_unit(val, base_plan.unit),
+                }
+            )
+        df = pd.DataFrame(rows)
+        st.dataframe(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            height=min(520, 40 + 28 * len(rows)),
+        )
 
     st.info(
         "ヒント: コントロールハブの％／実額・人員・売上を調整すると、標準原価ビューと一覧表が即座に更新されます。固定費や個別額を設定したい場合は、下の『金額上書き』をご利用ください。"
@@ -1789,14 +1887,16 @@ with tab_input:
         st.caption("金額が入力された項目は、率の指定より優先され固定費扱いになります。")
         col1, col2, col3 = st.columns(3)
         override_inputs = {}
-        for i, code in enumerate(["COGS_MAT","COGS_LBR","COGS_OUT_SRC","COGS_OUT_CON","COGS_OTH","OPEX_H","OPEX_K","OPEX_DEP","NOI_MISC","NOI_GRANT","NOI_OTH","NOE_INT","NOE_OTH"]):
+        for i, code in enumerate([
+            "COGS_MAT","COGS_LBR","COGS_OUT_SRC","COGS_OUT_CON","COGS_OTH",
+            "OPEX_H","OPEX_K","OPEX_DEP","NOI_MISC","NOI_GRANT","NOI_OTH","NOE_INT","NOE_OTH"
+        ]):
             if i % 3 == 0:
                 c = col1
             elif i % 3 == 1:
                 c = col2
             else:
                 c = col3
-            # Look up label without reconstructing the dictionary each time
             val = c.number_input(
                 f"{ITEM_LABELS[code]}（金額上書き）",
                 min_value=0.0,
@@ -1818,12 +1918,14 @@ with tab_input:
                     continue
                 before = base_amt[code]
                 after = preview_amt[code]
-                rows2.append({
-                    "項目": label,
-                    "経営メモ": PLAIN_LANGUAGE.get(code, "—"),
-                    "前": fmt_amount_with_unit(before),
-                    "後": fmt_amount_with_unit(after),
-                })
+                rows2.append(
+                    {
+                        "項目": label,
+                        "経営メモ": PLAIN_LANGUAGE.get(code, "—"),
+                        "前": format_amount_with_unit(before, base_plan.unit),
+                        "後": format_amount_with_unit(after, base_plan.unit),
+                    }
+                )
             st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
 
     glossary_html = "<div class='glossary-card'><h4>用語ミニガイド</h4><ul>"
@@ -2109,9 +2211,9 @@ with tab_ai:
     metrics = summarize_plan_metrics(base_amt_ai)
 
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("売上高 (目標)", f"{format_money(metrics['sales'], unit)} {unit}")
+    m1.metric("売上高 (目標)", format_amount_with_unit(metrics["sales"], unit))
     m2.metric("粗利率", format_ratio(metrics.get("gross_margin")))
-    m3.metric("経常利益", f"{format_money(metrics['ord'], unit)} {unit}")
+    m3.metric("経常利益", format_amount_with_unit(metrics["ord"], unit))
     m4.metric("経常利益率", format_ratio(metrics.get("ord_margin")))
 
     st.markdown("### AIレコメンド")
