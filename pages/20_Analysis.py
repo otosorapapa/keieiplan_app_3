@@ -24,6 +24,22 @@ from theme import inject_theme
 
 ITEM_LABELS = {code: label for code, label, _ in ITEMS}
 
+PLOTLY_DOWNLOAD_OPTIONS = {
+    "format": "png",
+    "height": 600,
+    "width": 1000,
+    "scale": 2,
+}
+
+
+def plotly_download_config(name: str) -> Dict[str, object]:
+    """Ensure every Plotly chart exposes an image download button."""
+
+    return {
+        "displaylogo": False,
+        "toImageButtonOptions": {"filename": name, **PLOTLY_DOWNLOAD_OPTIONS},
+    }
+
 
 def _to_decimal(value: object) -> Decimal:
     return Decimal(str(value))
@@ -363,13 +379,17 @@ with kpi_tab:
     monthly_pl_fig.update_layout(
         barmode='stack',
         hovermode='x unified',
-        legend_title_text='',
+        legend=dict(title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'),
         yaxis_title='金額 (円)',
         yaxis_tickformat=',',
     )
 
     st.markdown('### 月次PL（スタック棒）')
-    st.plotly_chart(monthly_pl_fig, use_container_width=True)
+    st.plotly_chart(
+        monthly_pl_fig,
+        use_container_width=True,
+        config=plotly_download_config('monthly_pl'),
+    )
 
     trend_cols = st.columns(2)
     with trend_cols[0]:
@@ -388,10 +408,17 @@ with kpi_tab:
             hovermode='x unified',
             yaxis_title='粗利率 (%)',
             yaxis_ticksuffix='%',
-            legend_title_text='',
+            yaxis_tickformat='.1f',
+            legend=dict(
+                title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'
+            ),
         )
         st.markdown('#### 粗利率推移')
-        st.plotly_chart(margin_fig, use_container_width=True)
+        st.plotly_chart(
+            margin_fig,
+            use_container_width=True,
+            config=plotly_download_config('gross_margin_trend'),
+        )
 
     with trend_cols[1]:
         st.markdown('#### 費用構成ドーナツ')
@@ -405,8 +432,16 @@ with kpi_tab:
                     hovertemplate='%{label}: ¥%{value:,.0f}<extra></extra>',
                 )
             )
-            cost_fig.update_layout(legend_title_text='')
-            st.plotly_chart(cost_fig, use_container_width=True)
+            cost_fig.update_layout(
+                legend=dict(
+                    title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'
+                )
+            )
+            st.plotly_chart(
+                cost_fig,
+                use_container_width=True,
+                config=plotly_download_config('cost_breakdown'),
+            )
         else:
             st.info('費用構成を表示するデータがありません。')
 
@@ -425,8 +460,16 @@ with kpi_tab:
             hovertemplate='%{x}: ¥%{y:,.0f}<extra></extra>',
         )
     )
-    fcf_fig.update_layout(showlegend=False, yaxis_title='金額 (円)')
-    st.plotly_chart(fcf_fig, use_container_width=True)
+    fcf_fig.update_layout(
+        showlegend=False,
+        yaxis_title='金額 (円)',
+        yaxis_tickformat=',',
+    )
+    st.plotly_chart(
+        fcf_fig,
+        use_container_width=True,
+        config=plotly_download_config('fcf_waterfall'),
+    )
 
     st.markdown('### PLサマリー')
     pl_rows: List[Dict[str, object]] = []
@@ -493,11 +536,17 @@ with be_tab:
         xaxis_title='売上高 (円)',
         yaxis_title='金額 (円)',
         hovermode='x unified',
-        legend_title_text='',
+        legend=dict(title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'),
+        xaxis_tickformat=',',
+        yaxis_tickformat=',',
     )
 
     st.markdown('### CVPチャート')
-    st.plotly_chart(cvp_fig, use_container_width=True)
+    st.plotly_chart(
+        cvp_fig,
+        use_container_width=True,
+        config=plotly_download_config('cvp_chart'),
+    )
     st.caption(
         f"変動費率: {format_ratio(variable_rate)} ／ 固定費: {format_amount_with_unit(fixed_cost, unit)}"
     )
@@ -524,8 +573,16 @@ with cash_tab:
             hovertemplate='%{x}: ¥%{y:,.0f}<extra></extra>',
         )
     )
-    cf_fig.update_layout(showlegend=False, yaxis_title='金額 (円)')
-    st.plotly_chart(cf_fig, use_container_width=True)
+    cf_fig.update_layout(
+        showlegend=False,
+        yaxis_title='金額 (円)',
+        yaxis_tickformat=',',
+    )
+    st.plotly_chart(
+        cf_fig,
+        use_container_width=True,
+        config=plotly_download_config('cashflow_summary'),
+    )
 
     st.markdown('### DSCR / 債務償還年数')
     if not dscr_df.empty:
@@ -552,10 +609,21 @@ with cash_tab:
             ),
             secondary_y=True,
         )
-        dscr_fig.update_yaxes(title_text='DSCR (倍)', secondary_y=False)
-        dscr_fig.update_yaxes(title_text='債務償還年数 (年)', secondary_y=True)
-        dscr_fig.update_layout(hovermode='x unified', legend_title_text='')
-        st.plotly_chart(dscr_fig, use_container_width=True)
+        dscr_fig.update_yaxes(title_text='DSCR (倍)', tickformat='.2f', secondary_y=False)
+        dscr_fig.update_yaxes(
+            title_text='債務償還年数 (年)', tickformat='.1f', secondary_y=True
+        )
+        dscr_fig.update_layout(
+            hovermode='x unified',
+            legend=dict(
+                title=dict(text=''), itemclick='toggleothers', itemdoubleclick='toggle'
+            ),
+        )
+        st.plotly_chart(
+            dscr_fig,
+            use_container_width=True,
+            config=plotly_download_config('dscr_timeseries'),
+        )
     else:
         st.info('借入データが未登録のため、DSCRを算出できません。')
 
