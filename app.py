@@ -186,6 +186,7 @@ button[kind="primary"]:hover {{
 div[data-testid="stDataFrame"] table {{
     border-spacing: 0;
     color: var(--text-color);
+    width: 100%;
 }}
 
 div[data-testid="stDataFrame"] table thead th {{
@@ -193,6 +194,13 @@ div[data-testid="stDataFrame"] table thead th {{
     color: var(--primary);
     font-weight: 600;
     border-bottom: 1px solid rgba(31, 78, 121, 0.18);
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}}
+
+div[data-testid="stDataFrame"] table tbody td {{
+    white-space: nowrap;
 }}
 
 div[data-testid="stDataFrame"] table tbody tr:nth-child(even) {{
@@ -1048,6 +1056,75 @@ def format_amount_with_unit(value: float, unit: str) -> str:
     return formatted if formatted == "—" else f"{formatted} {unit}"
 
 
+def sanitize_amount(value: Any) -> float:
+    """表形式で扱う金額値を数値（円）に正規化。"""
+
+    if value is None:
+        return float("nan")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return float("nan")
+    return numeric if math.isfinite(numeric) else float("nan")
+
+
+def sanitize_ratio(value: Any) -> float:
+    """比率（0-1想定）をパーセント表示用に正規化。"""
+
+    numeric = sanitize_amount(value)
+    if math.isnan(numeric):
+        return numeric
+    return numeric * 100.0
+
+
+def dataframe_height(
+    df: pd.DataFrame,
+    *,
+    min_rows: int = 3,
+    row_height: int = 36,
+    base_height: int = 72,
+    max_height: int = 720,
+) -> int:
+    """DataFrame表示用の高さ（Stickyヘッダー向け）を計算する。"""
+
+    rows = max(len(df), min_rows)
+    return int(min(max_height, base_height + row_height * rows))
+
+
+def build_column_config(
+    df: pd.DataFrame,
+    *,
+    unit: str | None = None,
+    overrides: Dict[str, st.column_config.Column] | None = None,
+) -> Dict[str, st.column_config.Column]:
+    """列名に応じたcolumn_configを自動生成。"""
+
+    config: Dict[str, st.column_config.Column] = {}
+    if overrides:
+        config.update(overrides)
+    currency_help = "円表示"
+    if unit and unit != "円":
+        currency_help = f"円表示（元単位: {unit}）"
+    for col in df.columns:
+        if col in config:
+            continue
+        col_name = str(col)
+        if col_name.endswith("金額") or col_name == "金額" or col_name.endswith("金額(円)"):
+            config[col] = st.column_config.NumberColumn(
+                col_name,
+                format="¥,.0f",
+                help=currency_help,
+            )
+        elif col_name.endswith("率") or col_name.endswith("比率"):
+            config[col] = st.column_config.NumberColumn(
+                col_name,
+                format="%.1f%%",
+            )
+        elif col_name.endswith("進捗") or col_name == "進捗":
+            config[col] = st.column_config.ProgressColumn(col_name)
+    return config
+
+
 def _format_amount_delta(value: float, unit: str) -> str:
     if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
         return "±0"
@@ -1534,7 +1611,21 @@ def render_scenario_table(base_plan: dict, plan: dict,
                           be_mode: str = "OP"):
     st.subheader("📊 シナリオ比較（是正版）")
     df = build_scenario_dataframe(base_plan, plan, nonop, target_ord, be_mode)
-    st.dataframe(df.style.format("{:,.0f}"), use_container_width=True)
+    df_display = df.replace({np.inf: np.nan, -np.inf: np.nan})
+    scenario_config = {
+        col: st.column_config.NumberColumn(
+            col,
+            format="¥,.0f",
+            help="円表示（シナリオ比較）",
+        )
+        for col in df_display.columns
+    }
+    st.dataframe(
+        df_display,
+        use_container_width=True,
+        height=dataframe_height(df_display, max_height=640),
+        column_config=build_column_config(df_display, overrides=scenario_config),
+    )
 
 
 def scenario_table(plan: "PlanConfig", unit: str, overrides: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame, List[Tuple[str, Dict[str, float]]]]:
@@ -1690,50 +1781,120 @@ def scenario_table(plan: "PlanConfig", unit: str, overrides: Dict[str, float]) -
             norm_val = float(val)
         editable.append((row["名称"], {"type": typ_code, "value": norm_val}))
 
-    cols = ["項目", "経営メモ"] + [nm for nm, _ in editable]
-    rows = {
-        code: [label, PLAIN_LANGUAGE.get(code, "—")]
-        for code, label, _ in ITEMS
-        if code not in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES")
-    }
-    kpis = {
-        "BE_SALES": ["損益分岐点売上高", PLAIN_LANGUAGE.get("BE_SALES", "—")],
-        "PC_SALES": ["一人当たり売上", PLAIN_LANGUAGE.get("PC_SALES", "—")],
-        "PC_GROSS": ["一人当たり粗利", PLAIN_LANGUAGE.get("PC_GROSS", "—")],
-        "PC_ORD": ["一人当たり経常利益", PLAIN_LANGUAGE.get("PC_ORD", "—")],
-        "LDR": ["労働分配率", PLAIN_LANGUAGE.get("LDR", "—")],
-    }
-
+    scenario_labels = [nm for nm, _ in editable]
     base_amt = compute(plan, amount_overrides=overrides)
-    for code, label, _ in ITEMS:
-        if code in rows:
-            rows[code].append(format_money(base_amt.get(code, 0.0), unit))
-    for k in kpis.keys():
-        if k == "LDR":
-            val = base_amt.get("LDR", float("nan"))
-            kpis[k].append(f"{val*100:.0f}%" if val == val else "—")
-        else:
-            kpis[k].append(format_money(base_amt.get(k, 0.0), unit))
+    scenario_results: Dict[str, Dict[str, float]] = {}
+    if scenario_labels:
+        scenario_results[scenario_labels[0]] = base_amt
+    else:
+        scenario_labels = ["目標"]
+        scenario_results["目標"] = base_amt
 
     for nm, spec in editable[1:]:
         S_override, ov, pre_amt = apply_driver(plan, spec, overrides)
-        scn_amt = compute(plan, sales_override=S_override, amount_overrides=ov) if pre_amt is None else pre_amt
-        for code, label, _ in ITEMS:
-            if code in rows:
-                rows[code].append(format_money(scn_amt.get(code, 0.0), unit))
-        for k in kpis.keys():
-            if k == "LDR":
-                v = scn_amt.get("LDR", float("nan"))
-                kpis[k].append(f"{v*100:.0f}%" if v == v else "—")
-            else:
-                kpis[k].append(format_money(scn_amt.get(k, 0.0), unit))
+        scenario_amounts = compute(plan, sales_override=S_override, amount_overrides=ov) if pre_amt is None else pre_amt
+        scenario_results[nm] = scenario_amounts
 
-    df_amounts = pd.DataFrame(rows.values(), columns=cols, index=rows.keys())
-    df_kpis = pd.DataFrame(kpis.values(), columns=cols, index=kpis.keys())
+    amount_codes = [
+        code
+        for code, _, _ in ITEMS
+        if code not in {"PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES"}
+    ]
+    amount_rows: Dict[str, Dict[str, Any]] = {}
+    for code in amount_codes:
+        row = {
+            "項目": ITEM_LABELS.get(code, code),
+            "経営メモ": PLAIN_LANGUAGE.get(code, "—"),
+        }
+        for name in scenario_labels:
+            value = scenario_results.get(name, {}).get(code, float("nan"))
+            row[name] = sanitize_amount(value)
+        amount_rows[code] = row
+    df_amounts = pd.DataFrame.from_dict(amount_rows, orient="index")
+    df_amounts = df_amounts[["項目", "経営メモ", *scenario_labels]]
+
+    kpi_definitions = [
+        ("BE_SALES", "損益分岐点売上高", "amount"),
+        ("PC_SALES", "一人当たり売上", "amount"),
+        ("PC_GROSS", "一人当たり粗利", "amount"),
+        ("PC_ORD", "一人当たり経常利益", "amount"),
+        ("LDR", "労働分配率", "ratio"),
+    ]
+    kpi_rows: Dict[str, Dict[str, Any]] = {}
+    for code, label, kind in kpi_definitions:
+        row = {
+            "項目": label,
+            "経営メモ": PLAIN_LANGUAGE.get(code, "—"),
+        }
+        for name in scenario_labels:
+            value = scenario_results.get(name, {}).get(code, float("nan"))
+            row[name] = sanitize_ratio(value) if kind == "ratio" else sanitize_amount(value)
+        kpi_rows[code] = row
+    df_kpis = pd.DataFrame.from_dict(kpi_rows, orient="index")
+    df_kpis = df_kpis[["項目", "経営メモ", *scenario_labels]]
+
+    amount_config_overrides: Dict[str, st.column_config.Column] = {
+        "項目": st.column_config.TextColumn("項目", width="medium"),
+        "経営メモ": st.column_config.TextColumn("経営メモ", width="large"),
+    }
+    for name in scenario_labels:
+        amount_config_overrides[name] = st.column_config.NumberColumn(
+            name,
+            format="¥,.0f",
+            help=f"円表示（元単位: {unit}）",
+        )
+
     st.subheader("シナリオ比較（金額）")
-    st.dataframe(df_amounts, use_container_width=True, hide_index=True)
+    st.dataframe(
+        df_amounts,
+        use_container_width=True,
+        hide_index=True,
+        height=dataframe_height(df_amounts, max_height=680),
+        column_config=build_column_config(df_amounts, unit=unit, overrides=amount_config_overrides),
+    )
+    st.caption("※ 金額列は円換算で表示しています。")
+
+    kpi_amount_index = [code for code, _, kind in kpi_definitions if kind == "amount"]
+    kpi_ratio_index = [code for code, _, kind in kpi_definitions if kind == "ratio"]
+    df_kpi_amounts = df_kpis.reindex(kpi_amount_index).dropna(how="all", axis=0)
+    df_kpi_ratios = df_kpis.reindex(kpi_ratio_index).dropna(how="all", axis=0)
+
     st.subheader("KPI（損益分岐点・一人当たり・労働分配率）")
-    st.dataframe(df_kpis, use_container_width=True, hide_index=True)
+    if not df_kpi_amounts.empty:
+        kpi_amount_overrides: Dict[str, st.column_config.Column] = {
+            "項目": st.column_config.TextColumn("項目", width="medium"),
+            "経営メモ": st.column_config.TextColumn("経営メモ", width="large"),
+        }
+        for name in scenario_labels:
+            kpi_amount_overrides[name] = st.column_config.NumberColumn(
+                name,
+                format="¥,.0f",
+                help=f"円表示（元単位: {unit}）",
+            )
+        st.dataframe(
+            df_kpi_amounts,
+            use_container_width=True,
+            hide_index=True,
+            height=dataframe_height(df_kpi_amounts, max_height=520),
+            column_config=build_column_config(df_kpi_amounts, unit=unit, overrides=kpi_amount_overrides),
+        )
+    if not df_kpi_ratios.empty:
+        kpi_ratio_overrides: Dict[str, st.column_config.Column] = {
+            "項目": st.column_config.TextColumn("項目", width="medium"),
+            "経営メモ": st.column_config.TextColumn("経営メモ", width="large"),
+        }
+        for name in scenario_labels:
+            kpi_ratio_overrides[name] = st.column_config.NumberColumn(
+                name,
+                format="%.1f%%",
+            )
+        st.dataframe(
+            df_kpi_ratios,
+            use_container_width=True,
+            hide_index=True,
+            height=dataframe_height(df_kpi_ratios, min_rows=1, max_height=360),
+            column_config=build_column_config(df_kpi_ratios, unit=unit, overrides=kpi_ratio_overrides),
+        )
     return df_amounts, df_kpis, editable
 
 
@@ -2484,16 +2645,27 @@ with st.container():
             cost_table = [
                 {
                     "コスト項目": card["label"],
-                    "売上比率": format_ratio(card["ratio"]),
-                    "金額": format_amount_with_unit(card["value"], base_plan.unit),
+                    "売上比率": sanitize_ratio(card["ratio"]),
+                    "金額": sanitize_amount(card["value"]),
                     "ひとことで": card["desc"],
                 }
                 for card in cost_cards
             ]
+            cost_df = pd.DataFrame(cost_table)
+            cost_config = build_column_config(
+                cost_df,
+                unit=base_plan.unit,
+                overrides={
+                    "コスト項目": st.column_config.TextColumn("コスト項目", width="medium"),
+                    "ひとことで": st.column_config.TextColumn("ひとことで", width="large"),
+                },
+            )
             st.dataframe(
-                pd.DataFrame(cost_table),
+                cost_df,
                 use_container_width=True,
                 hide_index=True,
+                height=dataframe_height(cost_df, max_height=520),
+                column_config=cost_config,
             )
             st.caption(
                 "カードと表はコントロールハブの入力に連動して更新されます。粗利（CT）と標準原価のバランスを中央ビューで確認してください。"
@@ -2516,17 +2688,26 @@ with st.container():
                     {
                         "項目": label,
                         "経営メモ": memo,
-                        "金額": format_amount_with_unit(val, base_plan.unit),
+                        "金額": sanitize_amount(val),
                     }
                 )
             df_main = pd.DataFrame(rows)
             table_col, viz_col = st.columns([2.6, 1.4], gap="large")
             with table_col:
+                main_config = build_column_config(
+                    df_main,
+                    unit=base_plan.unit,
+                    overrides={
+                        "項目": st.column_config.TextColumn("項目", width="medium"),
+                        "経営メモ": st.column_config.TextColumn("経営メモ", width="large"),
+                    },
+                )
                 st.dataframe(
                     df_main,
                     use_container_width=True,
                     hide_index=True,
-                    height=min(520, 40 + 28 * len(rows)),
+                    height=dataframe_height(df_main, max_height=520),
+                    column_config=main_config,
                 )
             with viz_col:
                 st.markdown("#### 主指標ミニライン")
@@ -2626,11 +2807,28 @@ with st.container():
                         {
                             "項目": label,
                             "経営メモ": PLAIN_LANGUAGE.get(code, "—"),
-                            "前": format_amount_with_unit(before, base_plan.unit),
-                            "後": format_amount_with_unit(after, base_plan.unit),
+                            "前": sanitize_amount(before),
+                            "後": sanitize_amount(after),
                         }
                     )
-                st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
+                preview_df = pd.DataFrame(rows2)
+                preview_config = build_column_config(
+                    preview_df,
+                    unit=base_plan.unit,
+                    overrides={
+                        "項目": st.column_config.TextColumn("項目", width="medium"),
+                        "経営メモ": st.column_config.TextColumn("経営メモ", width="large"),
+                        "前": st.column_config.NumberColumn("前", format="¥,.0f", help="上書き前の金額（円）"),
+                        "後": st.column_config.NumberColumn("後", format="¥,.0f", help="上書き後の金額（円）"),
+                    },
+                )
+                st.dataframe(
+                    preview_df,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=dataframe_height(preview_df, max_height=520),
+                    column_config=preview_config,
+                )
 
         overrides = st.session_state.get("overrides", {})
         df_amounts, df_kpis, scenario_specs = scenario_table(base_plan, unit, overrides)
@@ -3018,13 +3216,22 @@ with st.container():
         st.markdown("### 異常値検知 (AI Quality Check)")
         anomalies_df = detect_anomalies_in_plan(numeric_amounts_data, numeric_kpis_data, unit, metrics)
         if not anomalies_df.empty:
+            anomaly_config = build_column_config(
+                anomalies_df,
+                overrides={
+                    "カテゴリ": st.column_config.TextColumn("カテゴリ", width="medium"),
+                    "対象": st.column_config.TextColumn("対象", width="medium"),
+                    "値": st.column_config.TextColumn("値", width="medium"),
+                    "判定": st.column_config.TextColumn("判定", width="small"),
+                    "コメント": st.column_config.TextColumn("コメント", width="large"),
+                },
+            )
             st.dataframe(
                 anomalies_df,
                 use_container_width=True,
                 hide_index=True,
-                column_config={
-                    "コメント": st.column_config.TextColumn("コメント", width="large"),
-                },
+                height=dataframe_height(anomalies_df, max_height=520),
+                column_config=anomaly_config,
             )
         else:
             st.success("異常値は検出されませんでした。データ整合性は良好です。")
