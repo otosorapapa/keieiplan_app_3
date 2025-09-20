@@ -5,6 +5,7 @@ import numpy as np
 import io
 import math
 import datetime as dt
+import copy
 from typing import Dict, Tuple, List, Any
 import altair as alt
 import openpyxl  # noqa: F401  # Ensure Excel engine is available
@@ -736,6 +737,179 @@ def render_sensitivity_waterfall(plan: dict, step: float, top_n: int, height_px:
 
     fig.tight_layout()
     st.pyplot(fig, use_container_width=True)
+
+
+SCENARIO_KEYS = ("A", "B", "C")
+SENSITIVITY_COST_CODES = [
+    "COGS_MAT",
+    "COGS_LBR",
+    "COGS_OUT_SRC",
+    "COGS_OUT_CON",
+    "COGS_OTH",
+]
+
+
+def _scenario_base_defaults(base_amt: Dict[str, float]) -> Dict[str, float]:
+    """現在の計画値から感度シナリオの初期値を構築する。"""
+
+    sales = float(base_amt.get("REV", 0.0))
+    gross = float(base_amt.get("GROSS", 0.0))
+    cogs_total = max(0.0, sales - gross)
+    cogs_ratio = (cogs_total / sales) if sales else 0.6
+
+    default_qty = st.session_state.get("what_if_default_quantity")
+    if default_qty is None or default_qty <= 0:
+        default_qty = float(max(10.0, round(sales / 10_000_000.0))) if sales > 0 else 100.0
+        st.session_state["what_if_default_quantity"] = default_qty
+
+    default_customers = st.session_state.get("what_if_default_customers")
+    if default_customers is None or default_customers <= 0:
+        default_customers = float(max(10.0, round(sales / 5_000_000.0))) if sales > 0 else 80.0
+        st.session_state["what_if_default_customers"] = default_customers
+
+    product_share = st.session_state.get("what_if_product_share")
+    if product_share is None:
+        product_share = 0.6
+        st.session_state["what_if_product_share"] = product_share
+    product_share = float(min(max(product_share, 0.0), 1.0))
+
+    product_sales = sales * product_share
+    service_sales = max(0.0, sales - product_sales)
+
+    quantity = float(default_qty) if default_qty else 1.0
+    if quantity <= 0:
+        quantity = 1.0
+    unit_price = product_sales / quantity if quantity > 0 else 0.0
+
+    customers = float(default_customers) if default_customers else 0.0
+    if customers <= 0:
+        avg_spend = service_sales
+        customers = 0.0
+    else:
+        avg_spend = service_sales / customers if customers else 0.0
+
+    return dict(
+        unit_price=unit_price,
+        quantity=quantity,
+        cogs_rate=max(0.0, min(1.0, cogs_ratio)),
+        customers=customers,
+        avg_spend=max(0.0, avg_spend),
+    )
+
+
+def _initialize_sensitivity_scenarios(base_amt: Dict[str, float]) -> Dict[str, Dict[str, Any]]:
+    """セッション未初期化時のA/B/Cシナリオを用意。"""
+
+    defaults = _scenario_base_defaults(base_amt)
+    scenario_a = copy.deepcopy(defaults)
+
+    scenario_b = copy.deepcopy(defaults)
+    scenario_b["unit_price"] *= 1.05
+    scenario_b["avg_spend"] *= 1.05
+    scenario_b["cogs_rate"] = max(0.0, min(1.0, scenario_b["cogs_rate"] - 0.02))
+
+    scenario_c = copy.deepcopy(defaults)
+    scenario_c["quantity"] *= 1.08
+    scenario_c["customers"] *= 1.05
+    scenario_c["avg_spend"] *= 1.03
+    scenario_c["cogs_rate"] = max(0.0, min(1.0, scenario_c["cogs_rate"] + 0.015))
+
+    return {
+        "A": {"name": "シナリオA", "params": scenario_a},
+        "B": {"name": "シナリオB", "params": scenario_b},
+        "C": {"name": "シナリオC", "params": scenario_c},
+    }
+
+
+def _apply_scenario_state(scenario_key: str, params: Dict[str, float], *, name: str | None = None) -> None:
+    """ウィジェット値とセッション内のシナリオ辞書を同時に更新。"""
+
+    scenarios = st.session_state.setdefault("what_if_scenarios", {})
+    scenarios.setdefault(scenario_key, {"name": f"シナリオ{scenario_key}", "params": {}})
+    scenarios[scenario_key]["params"] = copy.deepcopy(params)
+    if name is not None:
+        scenarios[scenario_key]["name"] = name
+        st.session_state[f"what_if_name_{scenario_key}"] = name
+
+    for field, value in params.items():
+        st.session_state[f"what_if_{scenario_key}_{field}"] = float(value)
+
+    st.session_state["what_if_scenarios"] = scenarios
+
+
+def _evaluate_sensitivity_scenario(
+    base_plan: "PlanConfig",
+    base_amounts: Dict[str, float],
+    params: Dict[str, float],
+    base_overrides: Dict[str, float] | None,
+) -> Dict[str, Any]:
+    """ドライバー設定からPlanConfigを再計算し主要指標を返す。"""
+
+    def _pos(value: float) -> float:
+        try:
+            return max(0.0, float(value))
+        except (TypeError, ValueError):
+            return 0.0
+
+    price = _pos(params.get("unit_price", 0.0))
+    quantity = _pos(params.get("quantity", 0.0))
+    customers = _pos(params.get("customers", 0.0))
+    avg_spend = _pos(params.get("avg_spend", 0.0))
+
+    sales_product = price * quantity
+    sales_service = customers * avg_spend
+    sales_total = sales_product + sales_service
+
+    cogs_rate = _pos(params.get("cogs_rate", 0.0))
+    cogs_rate = max(0.0, min(1.0, cogs_rate))
+
+    overrides = dict(base_overrides) if base_overrides else {}
+    cogs_target = sales_total * cogs_rate
+    base_cogs_total = sum(float(base_amounts.get(code, 0.0)) for code in SENSITIVITY_COST_CODES)
+
+    if cogs_target > 0:
+        if base_cogs_total > 0:
+            for code in SENSITIVITY_COST_CODES:
+                share = float(base_amounts.get(code, 0.0)) / base_cogs_total if base_cogs_total else 0.0
+                overrides[code] = max(0.0, cogs_target * share)
+        else:
+            overrides["COGS_OTH"] = cogs_target
+    else:
+        for code in SENSITIVITY_COST_CODES:
+            overrides[code] = 0.0
+
+    scenario_plan = base_plan.clone()
+    amounts = compute(scenario_plan, sales_override=sales_total, amount_overrides=overrides)
+    metrics = summarize_plan_metrics(amounts)
+
+    return {
+        "amounts": amounts,
+        "metrics": metrics,
+        "sales_total": sales_total,
+        "sales_breakdown": {"product": sales_product, "service": sales_service},
+    }
+
+
+def _plan_inputs_from_amounts(amounts: Dict[str, float]) -> Dict[str, float]:
+    """compute()の結果からrender_sensitivity_view向けの辞書を生成。"""
+
+    sales = float(amounts.get("REV", 0.0))
+    gross = float(amounts.get("GROSS", 0.0))
+    gp_rate = (gross / sales) if sales else 0.0
+    return {
+        "sales": sales,
+        "gp_rate": gp_rate,
+        "opex_h": float(amounts.get("OPEX_H", 0.0)),
+        "opex_fixed": float(amounts.get("OPEX_K", 0.0)),
+        "opex_dep": float(amounts.get("OPEX_DEP", 0.0)),
+        "opex_oth": -(
+            float(amounts.get("NOI_MISC", 0.0))
+            + float(amounts.get("NOI_GRANT", 0.0))
+            + float(amounts.get("NOI_OTH", 0.0))
+            - float(amounts.get("NOE_INT", 0.0))
+            - float(amounts.get("NOE_OTH", 0.0))
+        ),
+    }
 
 
 def render_sensitivity_view(plan: dict):
@@ -2581,17 +2755,243 @@ with st.container():
 
     with tab_sensitivity:
         _set_jp_font()
-        plan_amt = compute(base_plan, amount_overrides=st.session_state.get("overrides", {}))
-        plan_inputs = {
-            "sales": plan_amt["REV"],
-            "gp_rate": (plan_amt["GROSS"] / plan_amt["REV"]) if plan_amt["REV"] else 0.0,
-            "opex_h": plan_amt["OPEX_H"],
-            "opex_fixed": plan_amt["OPEX_K"],
-            "opex_dep": plan_amt["OPEX_DEP"],
-            "opex_oth": -(plan_amt["NOI_MISC"] + plan_amt["NOI_GRANT"] + plan_amt["NOI_OTH"]
-                           - plan_amt["NOE_INT"] - plan_amt["NOE_OTH"]),
-        }
-        render_sensitivity_view(plan_inputs)
+        overrides = st.session_state.get("overrides", {})
+        base_amounts = compute(base_plan, amount_overrides=overrides)
+        base_metrics = summarize_plan_metrics(base_amounts)
+
+        saved_presets = st.session_state.setdefault("what_if_presets", {})
+        if "what_if_scenarios" not in st.session_state:
+            st.session_state["what_if_scenarios"] = _initialize_sensitivity_scenarios(base_amounts)
+        scenarios = st.session_state["what_if_scenarios"]
+
+        for key, scn in scenarios.items():
+            st.session_state.setdefault(f"what_if_name_{key}", scn.get("name", f"シナリオ{key}"))
+            for field, value in scn.get("params", {}).items():
+                widget_key = f"what_if_{key}_{field}"
+                if widget_key not in st.session_state:
+                    st.session_state[widget_key] = float(value)
+
+        active_key = st.radio(
+            "シナリオ切り替え",
+            list(SCENARIO_KEYS),
+            horizontal=True,
+            key="what_if_active",
+            help="A/B/Cの前提を切り替えて、ドライバーを調整します。",
+        )
+
+        scenario_results: Dict[str, Dict[str, Any]] = {}
+        active_result: Dict[str, Any] | None = None
+
+        with st.container(border=True):
+            st.markdown(f"### シナリオ{active_key} コントロール")
+            scenarios = st.session_state["what_if_scenarios"]
+            scenario = scenarios[active_key]
+            params = scenario.setdefault("params", {})
+
+            name_value = st.text_input(
+                "シナリオ名",
+                value=st.session_state.get(f"what_if_name_{active_key}", scenario.get("name", f"シナリオ{active_key}")),
+                key=f"what_if_name_{active_key}",
+            )
+            scenario_name = name_value.strip() or f"シナリオ{active_key}"
+            scenario["name"] = scenario_name
+            st.session_state[f"what_if_name_{active_key}"] = scenario_name
+
+            ctrl_cols = st.columns(2, gap="large")
+            with ctrl_cols[0]:
+                unit_price_val = st.number_input(
+                    "単価 (円)",
+                    min_value=0.0,
+                    step=1000.0,
+                    format="%.0f",
+                    value=float(params.get("unit_price", 0.0)),
+                    key=f"what_if_{active_key}_unit_price",
+                )
+                quantity_val = st.number_input(
+                    "数量",
+                    min_value=0.0,
+                    step=1.0,
+                    value=float(params.get("quantity", 0.0)),
+                    key=f"what_if_{active_key}_quantity",
+                )
+                customers_val = st.number_input(
+                    "客数",
+                    min_value=0.0,
+                    step=1.0,
+                    value=float(params.get("customers", 0.0)),
+                    key=f"what_if_{active_key}_customers",
+                )
+            with ctrl_cols[1]:
+                avg_spend_val = st.number_input(
+                    "客単価 (円)",
+                    min_value=0.0,
+                    step=1000.0,
+                    format="%.0f",
+                    value=float(params.get("avg_spend", 0.0)),
+                    key=f"what_if_{active_key}_avg_spend",
+                )
+                cogs_rate_val = st.slider(
+                    "原価率",
+                    min_value=0.0,
+                    max_value=1.0,
+                    step=0.01,
+                    value=float(params.get("cogs_rate", 0.0)),
+                    key=f"what_if_{active_key}_cogs_rate",
+                )
+
+            params["unit_price"] = unit_price_val
+            params["quantity"] = quantity_val
+            params["customers"] = customers_val
+            params["avg_spend"] = avg_spend_val
+            params["cogs_rate"] = cogs_rate_val
+
+            scenario_results = {
+                key: _evaluate_sensitivity_scenario(base_plan, base_amounts, scn["params"], overrides)
+                for key, scn in scenarios.items()
+            }
+            active_result = scenario_results.get(active_key)
+            active_amounts = active_result.get("amounts", base_amounts) if active_result else base_amounts
+            active_metrics = active_result.get("metrics", base_metrics) if active_result else base_metrics
+
+            metric_cols = st.columns(3, gap="large")
+            metric_cols[0].metric(
+                "売上高",
+                format_amount_with_unit(active_amounts.get("REV", 0.0), base_plan.unit),
+                delta=_format_amount_delta(
+                    active_amounts.get("REV", 0.0) - base_amounts.get("REV", 0.0),
+                    base_plan.unit,
+                ),
+            )
+            metric_cols[1].metric(
+                "粗利率",
+                format_ratio(active_metrics.get("gross_margin")),
+                delta=_format_ratio_delta(
+                    float(active_metrics.get("gross_margin", float("nan")))
+                    - float(base_metrics.get("gross_margin", float("nan")))
+                ),
+            )
+            metric_cols[2].metric(
+                "経常利益",
+                format_amount_with_unit(active_amounts.get("ORD", 0.0), base_plan.unit),
+                delta=_format_amount_delta(
+                    active_amounts.get("ORD", 0.0) - base_amounts.get("ORD", 0.0),
+                    base_plan.unit,
+                ),
+            )
+
+            breakdown = active_result.get("sales_breakdown", {"product": 0.0, "service": 0.0}) if active_result else {"product": 0.0, "service": 0.0}
+            st.caption(
+                "売上構成: "
+                + f"製品 {format_amount_with_unit(breakdown.get('product', 0.0), base_plan.unit)} + "
+                + f"顧客 {format_amount_with_unit(breakdown.get('service', 0.0), base_plan.unit)}"
+                + f" = 合計 {format_amount_with_unit(active_result.get('sales_total', 0.0) if active_result else base_amounts.get('REV', 0.0), base_plan.unit)}"
+            )
+
+            with st.expander("💾 プリセット管理", expanded=False):
+                preset_name = st.text_input(
+                    "プリセット名",
+                    key=f"what_if_preset_name_{active_key}",
+                    placeholder="例: 強気ケース",
+                )
+                if st.button("現在の設定を保存", key=f"what_if_save_btn_{active_key}"):
+                    if preset_name.strip():
+                        saved_presets[preset_name.strip()] = {
+                            "params": copy.deepcopy(params),
+                            "name": scenario_name,
+                        }
+                        st.session_state["what_if_presets"] = saved_presets
+                        st.success(f"'{preset_name.strip()}' を保存しました。")
+                    else:
+                        st.warning("プリセット名を入力してください。")
+
+                if saved_presets:
+                    load_options = ["選択しない"] + list(saved_presets.keys())
+                    load_select = st.selectbox(
+                        "保存済みプリセットを適用",
+                        load_options,
+                        key=f"what_if_load_select_{active_key}",
+                    )
+                    if st.button("プリセットを適用", key=f"what_if_apply_btn_{active_key}"):
+                        if load_select != "選択しない":
+                            preset = saved_presets[load_select]
+                            _apply_scenario_state(active_key, preset["params"], name=preset.get("name"))
+                            st.experimental_rerun()
+
+                if st.button("ベース値にリセット", key=f"what_if_reset_btn_{active_key}"):
+                    defaults = _scenario_base_defaults(base_amounts)
+                    _apply_scenario_state(active_key, defaults, name=f"シナリオ{active_key}")
+                    st.experimental_rerun()
+
+        st.markdown("### シナリオ比較スナップショット")
+        compare_cols = st.columns(len(SCENARIO_KEYS), gap="large")
+        for idx, key in enumerate(SCENARIO_KEYS):
+            if key not in scenarios:
+                continue
+            result = scenario_results.get(key)
+            amounts = result.get("amounts", base_amounts) if result else base_amounts
+            metrics_view = result.get("metrics", base_metrics) if result else base_metrics
+            name = scenarios[key].get("name", f"シナリオ{key}")
+            col = compare_cols[idx]
+            col.markdown(f"#### {key}｜{name}")
+            col.metric(
+                "売上高",
+                format_amount_with_unit(amounts.get("REV", 0.0), base_plan.unit),
+                delta=_format_amount_delta(
+                    amounts.get("REV", 0.0) - base_amounts.get("REV", 0.0),
+                    base_plan.unit,
+                ),
+            )
+            col.metric(
+                "経常利益",
+                format_amount_with_unit(amounts.get("ORD", 0.0), base_plan.unit),
+                delta=_format_amount_delta(
+                    amounts.get("ORD", 0.0) - base_amounts.get("ORD", 0.0),
+                    base_plan.unit,
+                ),
+            )
+            col.metric(
+                "粗利率",
+                format_ratio(metrics_view.get("gross_margin")),
+                delta=_format_ratio_delta(
+                    float(metrics_view.get("gross_margin", float("nan")))
+                    - float(base_metrics.get("gross_margin", float("nan")))
+                ),
+            )
+
+            chart_df = pd.DataFrame(
+                {
+                    "指標": ["売上高", "粗利", "経常利益"],
+                    "金額": [
+                        amounts.get("REV", 0.0),
+                        amounts.get("GROSS", 0.0),
+                        amounts.get("ORD", 0.0),
+                    ],
+                }
+            )
+            chart = (
+                alt.Chart(chart_df)
+                .mark_bar(cornerRadiusTopLeft=6, cornerRadiusTopRight=6)
+                .encode(
+                    x=alt.X("指標:N", sort=None),
+                    y=alt.Y("金額:Q", axis=alt.Axis(format="~s")),
+                    color=alt.Color("指標:N", legend=None),
+                    tooltip=[
+                        alt.Tooltip("指標:N"),
+                        alt.Tooltip("金額:Q", title="金額", format=","),
+                    ],
+                )
+                .properties(height=140)
+            )
+            col.altair_chart(chart, use_container_width=True)
+            breakdown = result.get("sales_breakdown", {"product": 0.0, "service": 0.0}) if result else {"product": 0.0, "service": 0.0}
+            col.caption(
+                f"製品 {format_amount_with_unit(breakdown.get('product', 0.0), base_plan.unit)} ／ "
+                f"顧客 {format_amount_with_unit(breakdown.get('service', 0.0), base_plan.unit)}"
+            )
+
+        st.markdown("### 感応度チャート（選択シナリオ）")
+        target_amounts = active_result.get("amounts") if active_result else base_amounts
+        render_sensitivity_view(_plan_inputs_from_amounts(target_amounts))
 
     with tab_log:
         st.markdown("<span class='ai-badge'>AIによる自動レビュー</span>", unsafe_allow_html=True)
