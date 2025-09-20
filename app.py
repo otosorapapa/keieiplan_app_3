@@ -303,6 +303,8 @@ div[data-testid="stDataFrame"] table tbody tr:hover {{
 
 st.markdown(CUSTOM_STYLE, unsafe_allow_html=True)
 
+status_placeholder = st.empty()
+
 if "show_usage_guide" not in st.session_state:
     st.session_state["show_usage_guide"] = False
 
@@ -872,6 +874,23 @@ def format_amount_with_unit(value: float, unit: str) -> str:
     return formatted if formatted == "—" else f"{formatted} {unit}"
 
 
+def render_sidebar_navigation() -> str:
+    """ステップ型の操作ナビゲーションを表示し、選択中のステップを返す。"""
+
+    steps = [
+        ("①データ入力", "コントロールハブで売上・費用・FTEを設定します。"),
+        ("②分析・可視化", "サマリー／詳細KPI／チャート／感度分析タブで結果を読み解きます。"),
+        ("③レポート出力", "AIログとExcelエクスポートで関係者と共有しましょう。"),
+    ]
+    st.sidebar.header("操作ナビ")
+    selected = st.sidebar.radio("ステップ", [label for label, _ in steps], index=0)
+    tip = next((tip for label, tip in steps if label == selected), "")
+    if tip:
+        st.sidebar.info(tip)
+    st.sidebar.divider()
+    return selected
+
+
 def render_sidebar_overview(
     amounts: Dict[str, float],
     unit: str,
@@ -1268,6 +1287,267 @@ def render_scenario_table(base_plan: dict, plan: dict,
     st.subheader("📊 シナリオ比較（是正版）")
     df = build_scenario_dataframe(base_plan, plan, nonop, target_ord, be_mode)
     st.dataframe(df.style.format("{:,.0f}"), use_container_width=True)
+
+
+def scenario_table(plan: "PlanConfig", unit: str, overrides: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame, List[Tuple[str, Dict[str, float]]]]:
+    """タブ内でシナリオ比較テーブルと編集UIを構成し、派生データを返す。"""
+
+    type_options = [
+        ("なし", "none"),
+        ("売上高±%", "sales_pct"),
+        ("粗利率±pt", "gross_pt"),
+        ("目標経常", "target_op"),
+        ("昨年同一", "last_year"),
+        ("BEP", "bep"),
+    ]
+    type_display = [label for label, _ in type_options]
+    type_map = {label: code for label, code in type_options}
+    reverse_type_map = {code: label for label, code in type_options}
+
+    default_specs = [
+        {"名称": "目標", "タイプ": "なし", "値": None},
+        {"名称": "売上高10%増", "タイプ": "売上高±%", "値": 10.0},
+        {"名称": "売上高5%減", "タイプ": "売上高±%", "値": -5.0},
+        {"名称": "売上高10%減", "タイプ": "売上高±%", "値": -10.0},
+        {"名称": "粗利1%減", "タイプ": "粗利率±pt", "値": -1.0},
+        {"名称": "経常利益5千万円", "タイプ": "目標経常", "値": 50_000_000.0},
+        {"名称": "昨年同一", "タイプ": "昨年同一", "値": None},
+        {"名称": "損益分岐点売上高", "タイプ": "BEP", "値": None},
+    ]
+
+    df = st.session_state.get("scenario_df")
+    if df is None:
+        df = pd.DataFrame(default_specs)
+    else:
+        df = df.copy()
+        if "タイプ" in df.columns:
+            df["タイプ"] = df["タイプ"].map(lambda x: reverse_type_map.get(x, x))
+
+    st.caption("各シナリオのラベルとパラメータを編集できます。")
+    editor = st.data_editor(
+        df,
+        key="scenario_editor",
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "名称": st.column_config.TextColumn("名称"),
+            "タイプ": st.column_config.SelectboxColumn("タイプ", options=type_display),
+            "値": st.column_config.NumberColumn("値", help="タイプにより入力範囲が異なります"),
+        },
+    )
+    st.session_state["scenario_df"] = editor.copy()
+
+    def fmt_with_unit(value: float) -> str:
+        text = format_money(value, unit)
+        return text if text == "—" else f"{text} {unit}"
+
+    def apply_driver(plan_cfg: "PlanConfig", spec: Dict[str, float], overrides_local: Dict[str, float]):
+        t = spec.get("type", "none")
+        v = spec.get("value", None)
+        if t == "none":
+            return plan_cfg.base_sales, overrides_local, None
+        if t == "sales_pct":
+            S = plan_cfg.base_sales * (1.0 + float(v))
+            return S, overrides_local, None
+        if t == "gross_pt":
+            delta = float(v)
+            S = plan_cfg.base_sales
+            delta_e = -delta * S
+            ov = dict(overrides_local) if overrides_local else {}
+            current = ov.get("COGS_OTH", None)
+            if current is None:
+                tmp = compute(plan_cfg, sales_override=S, amount_overrides=ov)
+                base_oth = tmp["COGS_OTH"]
+                ov["COGS_OTH"] = max(0.0, base_oth + delta_e)
+            else:
+                ov["COGS_OTH"] = max(0.0, current + delta_e)
+            return S, ov, None
+        if t == "target_op":
+            target = float(v)
+            sol_S, sol_amt = bisection_for_target_op(plan_cfg, target, s_low=0.0, s_high=max(1.2 * plan_cfg.base_sales, 1_000_000.0))
+            return sol_S, overrides_local, sol_amt
+        if t == "last_year":
+            return plan_cfg.base_sales, overrides_local, None
+        if t == "bep":
+            temp = compute(plan_cfg, sales_override=plan_cfg.base_sales, amount_overrides=overrides_local)
+            be = temp["BE_SALES"]
+            return be if math.isfinite(be) else plan_cfg.base_sales, overrides_local, None
+        return plan_cfg.base_sales, overrides_local, None
+
+    b1, b2, b3, b4, b5 = st.columns(5)
+    if b1.button("➕ 追加"):
+        new_name = f"シナリオ{len(editor) + 1}"
+        editor.loc[len(editor)] = [new_name, "なし", None]
+        st.session_state["scenario_df"] = editor
+    if b2.button("🗑️ 選択行を削除"):
+        sel = st.session_state.get("scenario_editor", {}).get("selected_rows", [])
+        if sel:
+            editor = editor.drop(index=sel).reset_index(drop=True)
+            st.session_state["scenario_df"] = editor
+    if b3.button("⟳ 既定にリセット"):
+        editor = pd.DataFrame(default_specs)
+        st.session_state["scenario_df"] = editor
+    if b4.button("📌 保存"):
+        st.session_state["scenarios"] = editor.to_dict(orient="records")
+        st.success("保存しました。")
+    if b5.button("📥 読込") and "scenarios" in st.session_state:
+        editor = pd.DataFrame(st.session_state["scenarios"])
+        st.session_state["scenario_df"] = editor
+
+    selected = st.session_state.get("scenario_editor", {}).get("selected_rows", [])
+    if len(selected) == 1:
+        idx = selected[0]
+        row = editor.loc[idx]
+        typ_display = row.get("タイプ", "なし")
+        typ_code = type_map.get(typ_display, "none")
+        with st.expander(f"詳細設定：{row['名称']}", expanded=True):
+            if typ_code == "sales_pct":
+                val = st.slider("売上高±%", -50.0, 50.0, float(row["値"] or 0.0), 1.0)
+                editor.at[idx, "値"] = val
+            elif typ_code == "gross_pt":
+                val = st.slider("粗利率±pt", -10.0, 10.0, float(row["値"] or 0.0), 0.5, help="1pt=1%ポイント")
+                editor.at[idx, "値"] = val
+            elif typ_code == "target_op":
+                val = st.number_input(
+                    "目標経常利益（円）",
+                    min_value=0.0,
+                    value=float(row["値"] or 0.0),
+                    step=1_000_000.0,
+                    format="%.0f",
+                )
+                editor.at[idx, "値"] = val
+            else:
+                st.write("—")
+        st.session_state["scenario_df"] = editor
+        spec = {"type": typ_code, "value": editor.at[idx, "値"]}
+        base_amt = compute(plan, amount_overrides=overrides)
+        S_override, ov, pre_amt = apply_driver(plan, spec, overrides)
+        amt_prev = compute(plan, sales_override=S_override, amount_overrides=ov) if pre_amt is None else pre_amt
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("売上高", fmt_with_unit(amt_prev["REV"]))
+        c2.metric("粗利（CT）", fmt_with_unit(amt_prev["GROSS"]))
+        c3.metric("経常利益", fmt_with_unit(amt_prev["ORD"]))
+        be_lbl = "∞" if not math.isfinite(amt_prev["BE_SALES"]) else fmt_with_unit(amt_prev["BE_SALES"])
+        c4.metric("損益分岐点売上高", be_lbl)
+
+    editable: List[Tuple[str, Dict[str, float]]] = []
+    for _, row in editor.iterrows():
+        typ_display = row.get("タイプ", "なし")
+        typ_code = type_map.get(typ_display, "none")
+        val = row.get("値", None)
+        if val is None or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
+            norm_val = None
+        else:
+            norm_val = float(val)
+        editable.append((row["名称"], {"type": typ_code, "value": norm_val}))
+
+    cols = ["項目", "経営メモ"] + [nm for nm, _ in editable]
+    rows = {
+        code: [label, PLAIN_LANGUAGE.get(code, "—")]
+        for code, label, _ in ITEMS
+        if code not in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES")
+    }
+    kpis = {
+        "BE_SALES": ["損益分岐点売上高", PLAIN_LANGUAGE.get("BE_SALES", "—")],
+        "PC_SALES": ["一人当たり売上", PLAIN_LANGUAGE.get("PC_SALES", "—")],
+        "PC_GROSS": ["一人当たり粗利", PLAIN_LANGUAGE.get("PC_GROSS", "—")],
+        "PC_ORD": ["一人当たり経常利益", PLAIN_LANGUAGE.get("PC_ORD", "—")],
+        "LDR": ["労働分配率", PLAIN_LANGUAGE.get("LDR", "—")],
+    }
+
+    base_amt = compute(plan, amount_overrides=overrides)
+    for code, label, _ in ITEMS:
+        if code in rows:
+            rows[code].append(format_money(base_amt.get(code, 0.0), unit))
+    for k in kpis.keys():
+        if k == "LDR":
+            val = base_amt.get("LDR", float("nan"))
+            kpis[k].append(f"{val*100:.0f}%" if val == val else "—")
+        else:
+            kpis[k].append(format_money(base_amt.get(k, 0.0), unit))
+
+    for nm, spec in editable[1:]:
+        S_override, ov, pre_amt = apply_driver(plan, spec, overrides)
+        scn_amt = compute(plan, sales_override=S_override, amount_overrides=ov) if pre_amt is None else pre_amt
+        for code, label, _ in ITEMS:
+            if code in rows:
+                rows[code].append(format_money(scn_amt.get(code, 0.0), unit))
+        for k in kpis.keys():
+            if k == "LDR":
+                v = scn_amt.get("LDR", float("nan"))
+                kpis[k].append(f"{v*100:.0f}%" if v == v else "—")
+            else:
+                kpis[k].append(format_money(scn_amt.get(k, 0.0), unit))
+
+    df_amounts = pd.DataFrame(rows.values(), columns=cols, index=rows.keys())
+    df_kpis = pd.DataFrame(kpis.values(), columns=cols, index=kpis.keys())
+    st.subheader("シナリオ比較（金額）")
+    st.dataframe(df_amounts, use_container_width=True, hide_index=True)
+    st.subheader("KPI（損益分岐点・一人当たり・労働分配率）")
+    st.dataframe(df_kpis, use_container_width=True, hide_index=True)
+    return df_amounts, df_kpis, editable
+
+
+def compute_scenario_numeric(plan: "PlanConfig", specs: List[Tuple[str, Dict[str, float]]], overrides: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """シナリオ比較の数値版（Excel出力やAI分析で再利用）。"""
+
+    cols = ["項目"] + [nm for nm, _ in specs]
+    num_rows = {code: [label] for code, label, _ in ITEMS if code not in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES")}
+    num_kpis = {
+        "BE_SALES": ["損益分岐点売上高"],
+        "PC_SALES": ["一人当たり売上"],
+        "PC_GROSS": ["一人当たり粗利"],
+        "PC_ORD": ["一人当たり経常利益"],
+        "LDR": ["労働分配率"],
+    }
+
+    def apply_driver(spec: Dict[str, float]):
+        t = spec.get("type", "none")
+        v = spec.get("value", None)
+        if t == "none":
+            return plan.base_sales, overrides, None
+        if t == "sales_pct":
+            return plan.base_sales * (1.0 + float(v)), overrides, None
+        if t == "gross_pt":
+            S = plan.base_sales
+            delta_e = -float(v) * S
+            ov = dict(overrides) if overrides else {}
+            tmp = compute(plan, sales_override=S, amount_overrides=ov)
+            base_oth = tmp["COGS_OTH"]
+            ov["COGS_OTH"] = max(0.0, base_oth + delta_e)
+            return S, ov, None
+        if t == "target_op":
+            target = float(v)
+            sol_S, sol_amt = bisection_for_target_op(plan, target, s_low=0.0, s_high=max(1.2 * plan.base_sales, 1_000_000.0))
+            return sol_S, overrides, sol_amt
+        if t == "last_year":
+            return plan.base_sales, overrides, None
+        if t == "bep":
+            temp = compute(plan, sales_override=plan.base_sales, amount_overrides=overrides)
+            be = temp["BE_SALES"]
+            return (be if math.isfinite(be) else plan.base_sales), overrides, None
+        return plan.base_sales, overrides, None
+
+    base_amt = compute(plan, amount_overrides=overrides)
+    for code, label, _ in ITEMS:
+        if code in num_rows:
+            num_rows[code].append(base_amt.get(code, 0.0))
+    for k in num_kpis.keys():
+        num_kpis[k].append(base_amt.get(k, 0.0))
+
+    for nm, spec in specs[1:]:
+        S, ov, pre = apply_driver(spec)
+        scn_amt = compute(plan, sales_override=S, amount_overrides=ov) if pre is None else pre
+        for code, label, _ in ITEMS:
+            if code in num_rows:
+                num_rows[code].append(scn_amt.get(code, 0.0))
+        for k in num_kpis.keys():
+            num_kpis[k].append(scn_amt.get(k, 0.0))
+
+    df_num = pd.DataFrame(num_rows.values(), columns=cols, index=num_rows.keys())
+    df_kpi = pd.DataFrame(num_kpis.values(), columns=cols, index=num_kpis.keys())
+    return df_num, df_kpi
 
 class PlanConfig:
     def __init__(self, base_sales: float, fte: float, unit: str) -> None:
@@ -1690,17 +1970,24 @@ with st.container():
 
     sidebar_overrides = st.session_state.get("overrides", {})
     sidebar_amounts = compute(base_plan)
+    selected_step = render_sidebar_navigation()
+    st.session_state["sidebar_step"] = selected_step
     render_sidebar_overview(sidebar_amounts, unit, fiscal_year, sidebar_overrides)
 
 st.divider()
 
 
 with st.container():
-    tab_input, tab_scen, tab_analysis, tab_ai, tab_export = st.tabs(
-        ["📝 計画入力", "🧪 シナリオ", "📊 感応度分析", "🤖 AIインサイト", "📤 エクスポート"]
+    tab_summary, tab_detail, tab_chart, tab_sensitivity, tab_log = st.tabs(
+        ["サマリー", "詳細KPI", "チャート", "感度分析", "ログ"]
     )
 
-    with tab_input:
+    status_timestamp = st.session_state.get("last_updated_ts", dt.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    validation_status_label = st.session_state.get("validation_status", "—")
+    numeric_amounts_data = pd.DataFrame()
+    numeric_kpis_data = pd.DataFrame()
+
+    with tab_summary:
         st.subheader("単年利益計画（目標列）")
         base_amt = compute(base_plan)
         metrics_view = summarize_plan_metrics(base_amt)
@@ -1739,14 +2026,29 @@ with st.container():
                 st.metric("労働分配率", format_ratio(metrics_view.get("labor_ratio")))
             st.caption(f"表示単位: {base_plan.unit} ｜ FTE: {base_plan.fte:.1f}人")
 
+
+        st.info(
+            "ヒント: コントロールハブの％／実額・人員・売上を調整すると、標準原価ビューと一覧表が即座に更新されます。固定費や個別額を設定したい場合は、『詳細KPI』タブの『金額上書き』をご利用ください。"
+        )
+
+        glossary_html = "<div class='glossary-card'><h4>用語ミニガイド</h4><ul>"
+        for item in GLOSSARY_ITEMS:
+            glossary_html += f"<li><strong>{item['term']}</strong><span>{item['description']}</span></li>"
+        glossary_html += "</ul></div>"
+        st.markdown(glossary_html, unsafe_allow_html=True)
+
+    with tab_chart:
+        st.subheader("標準原価と構成比チャート")
+        base_amt_chart = compute(base_plan)
+
         with st.container(border=True):
             st.markdown("### 標準原価の見える化（中央ビュー）")
             st.caption("コントロールハブで設定した原価や費用がリアルタイムに反映され、売上に対するインパクトを一目で確認できます。")
 
-            revenue = float(base_amt.get("REV", 0.0))
+            revenue = float(base_amt_chart.get("REV", 0.0))
             cost_cards = []
             for code, label, desc, extra_class in COST_PILL_ITEMS:
-                value = float(base_amt.get(code, 0.0) or 0.0)
+                value = float(base_amt_chart.get(code, 0.0) or 0.0)
                 ratio = value / revenue if revenue else float("nan")
                 cost_cards.append(
                     {
@@ -1884,13 +2186,18 @@ with st.container():
                 "カードと表はコントロールハブの入力に連動して更新されます。粗利（CT）と標準原価のバランスを中央ビューで確認してください。"
             )
 
+
+    with tab_detail:
+        st.subheader("詳細KPIとシナリオ設定")
+        base_amt_detail = compute(base_plan)
+
         with st.container(border=True):
             st.markdown("### 主要項目（経営メモ付き）")
             rows = []
             for code, label, group in ITEMS:
                 if code in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES"):
                     continue
-                val = base_amt[code]
+                val = base_amt_detail[code]
                 memo = PLAIN_LANGUAGE.get(code, "—")
                 rows.append(
                     {
@@ -1899,17 +2206,13 @@ with st.container():
                         "金額": format_amount_with_unit(val, base_plan.unit),
                     }
                 )
-            df = pd.DataFrame(rows)
+            df_main = pd.DataFrame(rows)
             st.dataframe(
-                df,
+                df_main,
                 use_container_width=True,
                 hide_index=True,
                 height=min(520, 40 + 28 * len(rows)),
             )
-
-        st.info(
-            "ヒント: コントロールハブの％／実額・人員・売上を調整すると、標準原価ビューと一覧表が即座に更新されます。固定費や個別額を設定したい場合は、下の『金額上書き』をご利用ください。"
-        )
 
         with st.expander("🔧 金額上書き（固定費/個別額の設定）", expanded=False):
             st.caption("金額が入力された項目は、率の指定より優先され固定費扱いになります。")
@@ -1944,7 +2247,7 @@ with st.container():
                 for code, label, group in ITEMS:
                     if code in ("PC_SALES","PC_GROSS","PC_ORD","LDR","BE_SALES"):
                         continue
-                    before = base_amt[code]
+                    before = base_amt_detail[code]
                     after = preview_amt[code]
                     rows2.append(
                         {
@@ -1956,281 +2259,142 @@ with st.container():
                     )
                 st.dataframe(pd.DataFrame(rows2), use_container_width=True, hide_index=True)
 
-        glossary_html = "<div class='glossary-card'><h4>用語ミニガイド</h4><ul>"
-        for item in GLOSSARY_ITEMS:
-            glossary_html += f"<li><strong>{item['term']}</strong><span>{item['description']}</span></li>"
-        glossary_html += "</ul></div>"
-        st.markdown(glossary_html, unsafe_allow_html=True)
-
-    def scenario_table(plan: PlanConfig, unit: str, overrides: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame, List[Tuple[str, Dict[str, float]]]]:
-        # --- SCENARIO UX
-        type_display = ["なし", "売上高±%", "粗利率±pt", "目標経常", "昨年同一", "BEP"]
-        type_map = {"なし": "none", "売上高±%": "sales_pct", "粗利率±pt": "gross_pt", "目標経常": "target_op", "昨年同一": "last_year", "BEP": "bep"}
-        default_specs = [
-            {"名称": "目標", "タイプ": "なし", "値": None},
-            {"名称": "売上高10%増", "タイプ": "売上高±%", "値": 10.0},
-            {"名称": "売上高5%減", "タイプ": "売上高±%", "値": -5.0},
-            {"名称": "売上高10%減", "タイプ": "売上高±%", "値": -10.0},
-            {"名称": "粗利1%減", "タイプ": "粗利率±pt", "値": -1.0},
-            {"名称": "経常利益5千万円", "タイプ": "目標経常", "値": 50_000_000.0},
-            {"名称": "昨年同一", "タイプ": "昨年同一", "値": None},
-            {"名称": "損益分岐点売上高", "タイプ": "BEP", "値": None},
-        ]
-        df = st.session_state.get("scenario_df")
-        if df is None:
-            df = pd.DataFrame(default_specs)
-        st.caption("各シナリオのラベルとパラメータを編集できます。")
-        editor = st.data_editor(
-            df,
-            key="scenario_editor",
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "名称": st.column_config.TextColumn("名称"),
-                "タイプ": st.column_config.SelectboxColumn("タイプ", options=type_display),
-                "値": st.column_config.NumberColumn("値", help="タイプにより入力範囲が異なります"),
-            },
-        )
-        st.session_state["scenario_df"] = editor.copy()
-
-        def fmt_with_unit(value: float) -> str:
-            text = format_money(value, unit)
-            return text if text == "—" else f"{text} {unit}"
-
-        def apply_driver(plan: PlanConfig, spec: Dict[str, float], overrides_local: Dict[str, float]):
-            t = spec["type"]
-            v = spec.get("value", None)
-            if t == "none":
-                return plan.base_sales, overrides_local, None
-            if t == "sales_pct":
-                S = plan.base_sales * (1.0 + float(v))
-                return S, overrides_local, None
-            if t == "gross_pt":
-                delta = float(v)
-                S = plan.base_sales
-                delta_e = -delta * S
-                ov = dict(overrides_local) if overrides_local else {}
-                current = ov.get("COGS_OTH", None)
-                if current is None:
-                    tmp = compute(plan, sales_override=S, amount_overrides=ov)
-                    base_oth = tmp["COGS_OTH"]
-                    ov["COGS_OTH"] = max(0.0, base_oth + delta_e)
-                else:
-                    ov["COGS_OTH"] = max(0.0, current + delta_e)
-                return S, ov, None
-            if t == "target_op":
-                target = float(v)
-                sol_S, sol_amt = bisection_for_target_op(plan, target, s_low=0.0, s_high=max(1.2 * plan.base_sales, 1_000_000.0))
-                return sol_S, overrides_local, sol_amt
-            if t == "last_year":
-                return plan.base_sales, overrides_local, None
-            if t == "bep":
-                temp = compute(plan, sales_override=plan.base_sales, amount_overrides=overrides_local)
-                be = temp["BE_SALES"]
-                return be if math.isfinite(be) else plan.base_sales, overrides_local, None
-            return plan.base_sales, overrides_local, None
-
-        b1, b2, b3, b4, b5 = st.columns(5)
-        if b1.button("➕ 追加"):
-            new_name = f"シナリオ{len(editor)+1}"
-            editor.loc[len(editor)] = [new_name, "なし", None]
-            st.session_state["scenario_df"] = editor
-        if b2.button("🗑️ 選択行を削除"):
-            sel = st.session_state.get("scenario_editor", {}).get("selected_rows", [])
-            if sel:
-                editor = editor.drop(index=sel).reset_index(drop=True)
-                st.session_state["scenario_df"] = editor
-        if b3.button("⟳ 既定にリセット"):
-            editor = pd.DataFrame(default_specs)
-            st.session_state["scenario_df"] = editor
-        if b4.button("📌 保存"):
-            st.session_state["scenarios"] = editor.to_dict(orient="records")
-            st.success("保存しました。")
-        if b5.button("📥 読込") and "scenarios" in st.session_state:
-            editor = pd.DataFrame(st.session_state["scenarios"])
-            st.session_state["scenario_df"] = editor
-
-        selected = st.session_state.get("scenario_editor", {}).get("selected_rows", [])
-        if len(selected) == 1:
-            idx = selected[0]
-            row = editor.loc[idx]
-            typ_code = type_map.get(row["タイプ"], "none")
-            with st.expander(f"詳細設定：{row['名称']}", expanded=True):
-                if typ_code == "sales_pct":
-                    val = st.slider("売上高±%", -50.0, 50.0, float(row["値"] or 0.0), 1.0)
-                    editor.at[idx, "値"] = val
-                elif typ_code == "gross_pt":
-                    val = st.slider("粗利率±pt", -10.0, 10.0, float(row["値"] or 0.0), 0.5, help="1pt=1%ポイント")
-                    editor.at[idx, "値"] = val
-                elif typ_code == "target_op":
-                    val = st.number_input("目標経常利益（円）", min_value=0.0, value=float(row["値"] or 0.0), step=1_000_000.0, format="%.0f")
-                    editor.at[idx, "値"] = val
-                else:
-                    st.write("—")
-            st.session_state["scenario_df"] = editor
-            spec = {"type": typ_code, "value": editor.at[idx, "値"]}
-            base_amt = compute(plan, amount_overrides=overrides)
-            S_override, ov, pre_amt = apply_driver(plan, spec, overrides)
-            amt_prev = compute(plan, sales_override=S_override, amount_overrides=ov) if pre_amt is None else pre_amt
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("売上高", fmt_with_unit(amt_prev["REV"]))
-            c2.metric("粗利（CT）", fmt_with_unit(amt_prev["GROSS"]))
-            c3.metric("経常利益", fmt_with_unit(amt_prev["ORD"]))
-            be_lbl = "∞" if not math.isfinite(amt_prev["BE_SALES"]) else fmt_with_unit(amt_prev["BE_SALES"])
-            c4.metric("損益分岐点売上高", be_lbl)
-
-        editable = []
-        for _, row in editor.iterrows():
-            typ_code = type_map.get(row["タイプ"], "none")
-            val = row["値"]
-            val = None if val is None or (isinstance(val, float) and (np.isnan(val) or np.isinf(val))) else float(val)
-            editable.append((row["名称"], {"type": typ_code, "value": val}))
-
-        cols = ["項目", "経営メモ"] + [nm for nm, _ in editable]
-        rows = {
-            code: [label, PLAIN_LANGUAGE.get(code, "—")]
-            for code, label, _ in ITEMS
-            if code not in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES")
-        }
-        kpis = {
-            "BE_SALES": ["損益分岐点売上高", PLAIN_LANGUAGE.get("BE_SALES", "—")],
-            "PC_SALES": ["一人当たり売上", PLAIN_LANGUAGE.get("PC_SALES", "—")],
-            "PC_GROSS": ["一人当たり粗利", PLAIN_LANGUAGE.get("PC_GROSS", "—")],
-            "PC_ORD": ["一人当たり経常利益", PLAIN_LANGUAGE.get("PC_ORD", "—")],
-            "LDR": ["労働分配率", PLAIN_LANGUAGE.get("LDR", "—")],
-        }
-
-        base_amt = compute(plan, amount_overrides=overrides)
-        for code, label, _ in ITEMS:
-            if code in rows:
-                rows[code].append(format_money(base_amt.get(code, 0.0), unit))
-        for k in kpis.keys():
-            if k == "LDR":
-                val = base_amt.get("LDR", float("nan"))
-                kpis[k].append(f"{val*100:.0f}%" if val == val else "—")
-            else:
-                kpis[k].append(format_money(base_amt.get(k, 0.0), unit))
-
-        for nm, spec in editable[1:]:
-            S_override, ov, pre_amt = apply_driver(plan, spec, overrides)
-            scn_amt = compute(plan, sales_override=S_override, amount_overrides=ov) if pre_amt is None else pre_amt
-            for code, label, _ in ITEMS:
-                if code in rows:
-                    rows[code].append(format_money(scn_amt.get(code, 0.0), unit))
-            for k in kpis.keys():
-                if k == "LDR":
-                    v = scn_amt.get("LDR", float("nan"))
-                    kpis[k].append(f"{v*100:.0f}%" if v == v else "—")
-                else:
-                    kpis[k].append(format_money(scn_amt.get(k, 0.0), unit))
-
-        df1 = pd.DataFrame(rows.values(), columns=cols, index=rows.keys())
-        df2 = pd.DataFrame(kpis.values(), columns=cols, index=kpis.keys())
-        st.subheader("シナリオ比較（金額）")
-        st.dataframe(df1, use_container_width=True, hide_index=True)
-        st.subheader("KPI（損益分岐点・一人当たり・労働分配率）")
-        st.dataframe(df2, use_container_width=True, hide_index=True)
-        return df1, df2, editable
-
-
-    def compute_scenario_numeric(plan: PlanConfig, specs: List[Tuple[str, Dict[str, float]]], overrides: Dict[str, float]) -> Tuple[pd.DataFrame, pd.DataFrame]:
-        """シナリオ比較の数値版（Excel出力やAI分析で再利用）。"""
-
-        cols = ["項目"] + [nm for nm, _ in specs]
-        num_rows = {code: [label] for code, label, _ in ITEMS if code not in ("PC_SALES", "PC_GROSS", "PC_ORD", "LDR", "BE_SALES")}
-        num_kpis = {
-            "BE_SALES": ["損益分岐点売上高"],
-            "PC_SALES": ["一人当たり売上"],
-            "PC_GROSS": ["一人当たり粗利"],
-            "PC_ORD": ["一人当たり経常利益"],
-            "LDR": ["労働分配率"],
-        }
-
-        def apply_driver(spec: Dict[str, float]):
-            t = spec.get("type", "none")
-            v = spec.get("value", None)
-            if t == "none":
-                return plan.base_sales, overrides, None
-            if t == "sales_pct":
-                return plan.base_sales * (1.0 + float(v)), overrides, None
-            if t == "gross_pt":
-                S = plan.base_sales
-                delta_e = -float(v) * S
-                ov = dict(overrides) if overrides else {}
-                tmp = compute(plan, sales_override=S, amount_overrides=ov)
-                base_oth = tmp["COGS_OTH"]
-                ov["COGS_OTH"] = max(0.0, base_oth + delta_e)
-                return S, ov, None
-            if t == "target_op":
-                target = float(v)
-                sol_S, sol_amt = bisection_for_target_op(plan, target, s_low=0.0, s_high=max(1.2 * plan.base_sales, 1_000_000.0))
-                return sol_S, overrides, sol_amt
-            if t == "last_year":
-                return plan.base_sales, overrides, None
-            if t == "bep":
-                temp = compute(plan, sales_override=plan.base_sales, amount_overrides=overrides)
-                be = temp["BE_SALES"]
-                return (be if math.isfinite(be) else plan.base_sales), overrides, None
-            return plan.base_sales, overrides, None
-
-        base_amt = compute(plan, amount_overrides=overrides)
-        for code, label, _ in ITEMS:
-            if code in num_rows:
-                num_rows[code].append(base_amt.get(code, 0.0))
-        for k in num_kpis.keys():
-            num_kpis[k].append(base_amt.get(k, 0.0))
-
-        for nm, spec in specs[1:]:
-            S, ov, pre = apply_driver(spec)
-            scn_amt = compute(plan, sales_override=S, amount_overrides=ov) if pre is None else pre
-            for code, label, _ in ITEMS:
-                if code in num_rows:
-                    num_rows[code].append(scn_amt.get(code, 0.0))
-            for k in num_kpis.keys():
-                num_kpis[k].append(scn_amt.get(k, 0.0))
-
-        df_num = pd.DataFrame(num_rows.values(), columns=cols, index=num_rows.keys())
-        df_kpi = pd.DataFrame(num_kpis.values(), columns=cols, index=num_kpis.keys())
-        return df_num, df_kpi
-
-    with tab_scen:
         overrides = st.session_state.get("overrides", {})
         df_amounts, df_kpis, scenario_specs = scenario_table(base_plan, unit, overrides)
 
-    numeric_amounts_data, numeric_kpis_data = compute_scenario_numeric(
-        base_plan,
-        scenario_specs,
-        st.session_state.get("overrides", {}),
-    )
-
-    with tab_analysis:
-        _set_jp_font()
-        base_amt_raw = compute(base_plan)
+        plan_amt_overrides = compute(base_plan, amount_overrides=overrides)
         base_plan_inputs = {
-            "sales": base_amt_raw["REV"],
-            "gp_rate": (base_amt_raw["GROSS"] / base_amt_raw["REV"]) if base_amt_raw["REV"] else 0.0,
-            "opex_h": base_amt_raw["OPEX_H"],
-            "opex_fixed": base_amt_raw["OPEX_K"],
-            "opex_dep": base_amt_raw["OPEX_DEP"],
-            "opex_oth": -(base_amt_raw["NOI_MISC"] + base_amt_raw["NOI_GRANT"] + base_amt_raw["NOI_OTH"]
-                           - base_amt_raw["NOE_INT"] - base_amt_raw["NOE_OTH"]),
+            "sales": base_amt_detail["REV"],
+            "gp_rate": (base_amt_detail["GROSS"] / base_amt_detail["REV"]) if base_amt_detail["REV"] else 0.0,
+            "opex_h": base_amt_detail["OPEX_H"],
+            "opex_fixed": base_amt_detail["OPEX_K"],
+            "opex_dep": base_amt_detail["OPEX_DEP"],
+            "opex_oth": -(base_amt_detail["NOI_MISC"] + base_amt_detail["NOI_GRANT"] + base_amt_detail["NOI_OTH"]
+                          - base_amt_detail["NOE_INT"] - base_amt_detail["NOE_OTH"]),
         }
-        base_amt = compute(base_plan, amount_overrides=st.session_state.get("overrides", {}))
         plan_inputs = {
-            "sales": base_amt["REV"],
-            "gp_rate": (base_amt["GROSS"] / base_amt["REV"]) if base_amt["REV"] else 0.0,
-            "opex_h": base_amt["OPEX_H"],
-            "opex_fixed": base_amt["OPEX_K"],
-            "opex_dep": base_amt["OPEX_DEP"],
-            "opex_oth": -(base_amt["NOI_MISC"] + base_amt["NOI_GRANT"] + base_amt["NOI_OTH"]
-                           - base_amt["NOE_INT"] - base_amt["NOE_OTH"]),
+            "sales": plan_amt_overrides["REV"],
+            "gp_rate": (plan_amt_overrides["GROSS"] / plan_amt_overrides["REV"]) if plan_amt_overrides["REV"] else 0.0,
+            "opex_h": plan_amt_overrides["OPEX_H"],
+            "opex_fixed": plan_amt_overrides["OPEX_K"],
+            "opex_dep": plan_amt_overrides["OPEX_DEP"],
+            "opex_oth": -(plan_amt_overrides["NOI_MISC"] + plan_amt_overrides["NOI_GRANT"] + plan_amt_overrides["NOI_OTH"]
+                          - plan_amt_overrides["NOE_INT"] - plan_amt_overrides["NOE_OTH"]),
         }
         render_scenario_table(base_plan_inputs, plan_inputs, NONOP_DEFAULT,
                               target_ord=50_000_000, be_mode="OP")
+
+        numeric_amounts_data, numeric_kpis_data = compute_scenario_numeric(base_plan, scenario_specs, overrides)
+
+        with st.container(border=True):
+            st.markdown("### データエクスポート")
+            st.caption("ワンクリックでExcel出力（シート: 金額, KPI, 感応度）。PDFはExcelから印刷設定で作成してください。")
+            specs = scenario_specs
+            df_num, df_kpi = numeric_amounts_data, numeric_kpis_data
+
+            def recompute_sensitivity_table():
+                base_amt = compute(base_plan, amount_overrides=st.session_state.get("overrides", {}))
+                base_op = base_amt["ORD"]
+
+                def op_with(ds=0.1, dgp=0.01, dH=0.1, dK=0.1):
+                    plan = base_plan.clone()
+                    S = plan.base_sales * (1.0 + ds)
+                    overrides_local = st.session_state.get("overrides", {}).copy()
+                    delta_e = -dgp * S
+                    overrides_local["COGS_OTH"] = max(0.0, compute(plan, sales_override=S, amount_overrides=overrides_local)["COGS_OTH"] + delta_e)
+                    val = compute(plan, sales_override=S, amount_overrides=overrides_local)["OPEX_H"]
+                    overrides_local["OPEX_H"] = max(0.0, val * (1.0 + dH))
+                    val = compute(plan, sales_override=S, amount_overrides=overrides_local)["OPEX_K"]
+                    overrides_local["OPEX_K"] = max(0.0, val * (1.0 + dK))
+                    return compute(plan, sales_override=S, amount_overrides=overrides_local)["ORD"]
+
+                changes = [
+                    ("売上高 +10%", op_with(ds=+0.10) - base_op),
+                    ("売上高 -10%", op_with(ds=-0.10) - base_op),
+                    ("粗利率 +1pt", op_with(dgp=+0.01) - base_op),
+                    ("粗利率 -1pt", op_with(dgp=-0.01) - base_op),
+                    ("人件費 +10%", op_with(dH=+0.10) - base_op),
+                    ("人件費 -10%", op_with(dH=-0.10) - base_op),
+                    ("経費 +10%", op_with(dK=+0.10) - base_op),
+                    ("経費 -10%", op_with(dK=-0.10) - base_op),
+                ]
+                df_local = pd.DataFrame(changes, columns=["ドライバ", "OP変化（円）"])
+                return df_local
+
+            df_sens = recompute_sensitivity_table()
+
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                sheets_written = 0
+                if isinstance(df_num, pd.DataFrame) and not df_num.empty:
+                    df_num.to_excel(writer, sheet_name="金額", index=True)
+                    sheets_written += 1
+                if isinstance(df_kpi, pd.DataFrame) and not df_kpi.empty:
+                    df_kpi.to_excel(writer, sheet_name="KPI", index=True)
+                    sheets_written += 1
+                if isinstance(df_sens, pd.DataFrame) and not df_sens.empty:
+                    df_sens.to_excel(writer, sheet_name="感応度", index=False)
+                    sheets_written += 1
+                if sheets_written == 0:
+                    pd.DataFrame().to_excel(writer, sheet_name="Sheet1")
+
+                wb = writer.book
+                if "金額" in wb.sheetnames:
+                    ws = wb["金額"]
+                    format_money_and_percent(ws, list(range(2, ws.max_column + 1)), [])
+                if "KPI" in wb.sheetnames:
+                    ws = wb["KPI"]
+                    money_fmt = "\"¥\"#,##0;[Red]-\"¥\"#,##0"
+                    for r in range(2, ws.max_row + 1):
+                        if ws.cell(row=r, column=1).value == "労働分配率":
+                            for c in range(2, ws.max_column + 1):
+                                ws.cell(row=r, column=c).number_format = "0%"
+                        else:
+                            for c in range(2, ws.max_column + 1):
+                                ws.cell(row=r, column=c).number_format = money_fmt
+                if "感応度" in wb.sheetnames:
+                    ws = wb["感応度"]
+                    format_money_and_percent(ws, [2], [])
+
+                meta_ws = wb.create_sheet("メタ情報")
+                meta_data = [
+                    ("作成日時", dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
+                    ("会計年度", fiscal_year),
+                    ("表示単位", unit),
+                    ("FTE", fte),
+                    ("ベース売上（円）", base_sales),
+                ]
+                for i, (k, v) in enumerate(meta_data, start=1):
+                    meta_ws.cell(row=i, column=1, value=k)
+                    meta_ws.cell(row=i, column=2, value=v)
+                format_money_and_percent(meta_ws, [2], [])
+
+                apply_japanese_styles(wb)
+            data = output.getvalue()
+
+            st.download_button(
+                label="📥 Excel（.xlsx）をダウンロード",
+                data=data,
+                file_name=f"利益計画_{dt.date.today().isoformat()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+
+    with tab_sensitivity:
+        _set_jp_font()
+        plan_amt = compute(base_plan, amount_overrides=st.session_state.get("overrides", {}))
+        plan_inputs = {
+            "sales": plan_amt["REV"],
+            "gp_rate": (plan_amt["GROSS"] / plan_amt["REV"]) if plan_amt["REV"] else 0.0,
+            "opex_h": plan_amt["OPEX_H"],
+            "opex_fixed": plan_amt["OPEX_K"],
+            "opex_dep": plan_amt["OPEX_DEP"],
+            "opex_oth": -(plan_amt["NOI_MISC"] + plan_amt["NOI_GRANT"] + plan_amt["NOI_OTH"]
+                           - plan_amt["NOE_INT"] - plan_amt["NOE_OTH"]),
+        }
         render_sensitivity_view(plan_inputs)
 
-    with tab_ai:
+    with tab_log:
         st.markdown("<span class='ai-badge'>AIによる自動レビュー</span>", unsafe_allow_html=True)
         st.subheader("インテリジェント・サマリー")
         st.caption("シナリオやコントロールハブの設定を更新すると、AIインサイトも即座にリフレッシュされます。")
@@ -2266,97 +2430,26 @@ with st.container():
         else:
             st.success("異常値は検出されませんでした。データ整合性は良好です。")
 
-    with tab_export:
-        st.subheader("エクスポート")
-        st.caption("ワンクリックでExcel出力（シート: 金額, KPI, 感応度）。PDFはExcelから印刷設定で作成してください。")
-        specs = scenario_specs
-        df_num, df_kpi = numeric_amounts_data, numeric_kpis_data
+        validation_status_label = "OK" if anomalies_df.empty else "NG"
+        status_timestamp = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+        st.session_state["validation_status"] = validation_status_label
+        st.session_state["last_updated_ts"] = status_timestamp
 
-        def recompute_sensitivity_table():
-            base_amt = compute(base_plan, amount_overrides=st.session_state.get("overrides", {}))
-            base_op = base_amt["ORD"]
-            def op_with(ds=0.1, dgp=0.01, dH=0.1, dK=0.1):
-                plan = base_plan.clone()
-                S = plan.base_sales * (1.0 + ds)
-                overrides = st.session_state.get("overrides", {}).copy()
-                delta_e = -dgp * S
-                overrides["COGS_OTH"] = max(0.0, compute(plan, sales_override=S, amount_overrides=overrides)["COGS_OTH"] + delta_e)
-                val = compute(plan, sales_override=S, amount_overrides=overrides)["OPEX_H"]
-                overrides["OPEX_H"] = max(0.0, val * (1.0 + dH))
-                val = compute(plan, sales_override=S, amount_overrides=overrides)["OPEX_K"]
-                overrides["OPEX_K"] = max(0.0, val * (1.0 + dK))
-                return compute(plan, sales_override=S, amount_overrides=overrides)["ORD"]
-            changes = [
-                ("売上高 +10%", op_with(ds=+0.10) - base_op),
-                ("売上高 -10%", op_with(ds=-0.10) - base_op),
-                ("粗利率 +1pt", op_with(dgp=+0.01) - base_op),
-                ("粗利率 -1pt", op_with(dgp=-0.01) - base_op),
-                ("人件費 +10%", op_with(dH=+0.10) - base_op),
-                ("人件費 -10%", op_with(dH=-0.10) - base_op),
-                ("経費 +10%", op_with(dK=+0.10) - base_op),
-                ("経費 -10%", op_with(dK=-0.10) - base_op),
-            ]
-            df = pd.DataFrame(changes, columns=["ドライバ","OP変化（円）"])
-            return df
 
-        df_sens = recompute_sensitivity_table()
 
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            sheets_written = 0
-            if isinstance(df_num, pd.DataFrame) and not df_num.empty:
-                df_num.to_excel(writer, sheet_name="金額", index=True)
-                sheets_written += 1
-            if isinstance(df_kpi, pd.DataFrame) and not df_kpi.empty:
-                df_kpi.to_excel(writer, sheet_name="KPI", index=True)
-                sheets_written += 1
-            if isinstance(df_sens, pd.DataFrame) and not df_sens.empty:
-                df_sens.to_excel(writer, sheet_name="感応度", index=False)
-                sheets_written += 1
-            if sheets_written == 0:
-                pd.DataFrame().to_excel(writer, sheet_name="Sheet1")
-
-            wb = writer.book
-            if "金額" in wb.sheetnames:
-                ws = wb["金額"]
-                format_money_and_percent(ws, list(range(2, ws.max_column + 1)), [])
-            if "KPI" in wb.sheetnames:
-                ws = wb["KPI"]
-                money_fmt = "\"¥\"#,##0;[Red]-\"¥\"#,##0"
-                for r in range(2, ws.max_row + 1):
-                    if ws.cell(row=r, column=1).value == "労働分配率":
-                        for c in range(2, ws.max_column + 1):
-                            ws.cell(row=r, column=c).number_format = "0%"
-                    else:
-                        for c in range(2, ws.max_column + 1):
-                            ws.cell(row=r, column=c).number_format = money_fmt
-            if "感応度" in wb.sheetnames:
-                ws = wb["感応度"]
-                format_money_and_percent(ws, [2], [])
-
-            meta_ws = wb.create_sheet("メタ情報")
-            meta_data = [
-                ("作成日時", dt.datetime.now().strftime("%Y-%m-%d %H:%M")),
-                ("会計年度", fiscal_year),
-                ("表示単位", unit),
-                ("FTE", fte),
-                ("ベース売上（円）", base_sales),
-            ]
-            for i, (k, v) in enumerate(meta_data, start=1):
-                meta_ws.cell(row=i, column=1, value=k)
-                meta_ws.cell(row=i, column=2, value=v)
-            format_money_and_percent(meta_ws, [2], [])
-
-            apply_japanese_styles(wb)
-        data = output.getvalue()
-
-        st.download_button(
-            label="📥 Excel（.xlsx）をダウンロード",
-            data=data,
-            file_name=f"利益計画_{dt.date.today().isoformat()}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-
+with status_placeholder.container():
+    status_cols = st.columns([3, 1])
+    status_cols[0].markdown(f"**最終更新:** {status_timestamp}")
+    if validation_status_label == "OK":
+        status_color = THEME_COLORS.get("positive_strong", THEME_COLORS["positive"])
+    elif validation_status_label == "NG":
+        status_color = THEME_COLORS.get("negative", "#FF4B4B")
+    else:
+        status_color = THEME_COLORS.get("text_subtle", "#596B7A")
+    status_cols[1].markdown(
+        f"**検証状態:** <span style='color: {status_color}; font-weight: 600;'>{validation_status_label}</span>",
+        unsafe_allow_html=True,
+    )
 
 st.divider()
 
