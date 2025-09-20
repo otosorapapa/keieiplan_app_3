@@ -1,0 +1,105 @@
+body {
+    font-family: "Noto Sans JP", "Hiragino Sans", "Yu Gothic", sans-serif;
+    line-height: 1.6;
+}
+
+.status-line {
+    font-size: 0.85rem;
+    color: #4A5568;
+    text-align: right;
+    margin-bottom: 0.5rem;
+}
+
+.field-label {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+
+.badge-required {
+    background-color: #E53E3E;
+    color: #FFFFFF;
+    border-radius: 999px;
+    padding: 0.1rem 0.6rem;
+    font-size: 0.7rem;
+}
+
+.sidebar-step {
+    padding: 0.4rem 0.6rem;
+    border-left: 3px solid transparent;
+    margin-bottom: 0.2rem;
+    color: #2D3748;
+}
+
+.sidebar-step.active-step {
+    background-color: #E2E8F0;
+    border-left-color: #2B6CB0;
+    font-weight: 600;
+}
+
+.step-indicator {
+    text-align: center;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #2B6CB0;
+}
+
+.insight-card {
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.8rem;
+    border-left: 6px solid #2B6CB0;
+    background-color: #F7FAFC;
+}
+
+.insight-card h4 {
+    margin: 0 0 0.3rem 0;
+    font-size: 1rem;
+}
+
+.insight-card p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #2D3748;
+}
+
+.insight-card.warning {
+    border-left-color: #DD6B20;
+    background-color: #FFF5F0;
+}
+
+.insight-card.alert {
+    border-left-color: #E53E3E;
+    background-color: #FFF5F5;
+}
+
+.insight-card.positive {
+    border-left-color: #38A169;
+    background-color: #F0FFF4;
+}
+
+.stMetricDelta {
+    font-size: 0.85rem;
+}
+
+[data-testid="stMetric"] {
+    border-radius: 12px;
+    background-color: #FFFFFF;
+    box-shadow: 0 4px 12px rgba(43, 108, 176, 0.15);
+    padding: 0.8rem 1rem;
+}
+
+[data-testid="stDataFrame"] table thead tr th {
+    background-color: #EDF2F7;
+    color: #2B6CB0;
+}
+
+[data-testid="stDataFrame"] table tbody tr:nth-child(even) {
+    background-color: #F8FAFC;
+}
+
+[data-testid="stToast"] {
+    font-size: 0.9rem;
+}

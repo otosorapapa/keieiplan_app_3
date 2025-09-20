@@ -1,0 +1,22 @@
+category,key,value
+company,company_name,ネクストテック株式会社
+company,project_name,FY25 成長戦略プラン
+company,fiscal_year,2025
+company,unit,百万円
+company,interest_bearing_debt,150000000
+sales,unit_price,520000
+sales,quantity,1900
+sales,fte,22
+ratios,COGS_MAT,0.24
+ratios,COGS_LBR,0.07
+ratios,COGS_OUT_SRC,0.09
+ratios,COGS_OUT_CON,0.05
+ratios,COGS_OTH,0.03
+ratios,OPEX_H,0.18
+ratios,OPEX_K,0.42
+ratios,OPEX_DEP,0.01
+ratios,NOI_MISC,0.002
+ratios,NOI_GRANT,0.0
+ratios,NOI_OTH,0.0
+ratios,NOE_INT,0.006
+ratios,NOE_OTH,0.0
