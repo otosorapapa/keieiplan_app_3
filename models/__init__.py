@@ -12,11 +12,13 @@ from .finance import (
     SalesItem,
     SalesPlan,
     TaxPolicy,
+    WorkingCapitalAssumptions,
     DEFAULT_CAPEX_PLAN,
     DEFAULT_COST_PLAN,
     DEFAULT_LOAN_SCHEDULE,
     DEFAULT_SALES_PLAN,
     DEFAULT_TAX_POLICY,
+    DEFAULT_WORKING_CAPITAL,
 )
 
 __all__ = [
@@ -31,9 +33,11 @@ __all__ = [
     "SalesItem",
     "SalesPlan",
     "TaxPolicy",
+    "WorkingCapitalAssumptions",
     "DEFAULT_CAPEX_PLAN",
     "DEFAULT_COST_PLAN",
     "DEFAULT_LOAN_SCHEDULE",
     "DEFAULT_SALES_PLAN",
     "DEFAULT_TAX_POLICY",
+    "DEFAULT_WORKING_CAPITAL",
 ]

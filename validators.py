@@ -13,6 +13,7 @@ from models import (
     LoanSchedule,
     SalesPlan,
     TaxPolicy,
+    WorkingCapitalAssumptions,
 )
 
 
@@ -74,6 +75,16 @@ def validate_tax(data: Dict[str, Any]) -> Tuple[TaxPolicy | None, List[Validatio
         return None, _issues_from_error("tax", exc)
 
 
+def validate_working_capital(
+    data: Dict[str, Any]
+) -> Tuple[WorkingCapitalAssumptions | None, List[ValidationIssue]]:
+    try:
+        wc = WorkingCapitalAssumptions(**data)
+        return wc, []
+    except ValidationError as exc:
+        return None, _issues_from_error("working_capital", exc)
+
+
 def validate_bundle(data: Dict[str, Any]) -> Tuple[FinanceBundle | None, List[ValidationIssue]]:
     """Validate a nested dictionary covering all plan components."""
 
@@ -82,6 +93,7 @@ def validate_bundle(data: Dict[str, Any]) -> Tuple[FinanceBundle | None, List[Va
     capex, capex_errs = validate_capex(data.get("capex", {}))
     loans, loan_errs = validate_loans(data.get("loans", {}))
     tax, tax_errs = validate_tax(data.get("tax", {}))
+    working_capital, wc_errs = validate_working_capital(data.get("working_capital", {}))
 
     issues: List[ValidationIssue] = []
     issues.extend(sales_errs)
@@ -89,12 +101,20 @@ def validate_bundle(data: Dict[str, Any]) -> Tuple[FinanceBundle | None, List[Va
     issues.extend(capex_errs)
     issues.extend(loan_errs)
     issues.extend(tax_errs)
+    issues.extend(wc_errs)
 
     if issues:
         return None, issues
 
-    assert sales and costs and capex and loans and tax  # for mypy/static typing
-    bundle = FinanceBundle(sales=sales, costs=costs, capex=capex, loans=loans, tax=tax)
+    assert sales and costs and capex and loans and tax and working_capital  # for mypy/static typing
+    bundle = FinanceBundle(
+        sales=sales,
+        costs=costs,
+        capex=capex,
+        loans=loans,
+        tax=tax,
+        working_capital=working_capital,
+    )
     return bundle, []
 
 
@@ -109,6 +129,7 @@ __all__ = [
     "validate_capex",
     "validate_loans",
     "validate_tax",
+    "validate_working_capital",
     "validate_bundle",
     "collect_error_messages",
 ]

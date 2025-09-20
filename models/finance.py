@@ -145,8 +145,29 @@ class CapexItem(BaseModel):
 
 class CapexPlan(BaseModel):
     items: List[CapexItem] = Field(default_factory=list)
+    depreciation_method: Literal["straight_line", "declining_balance"] = "straight_line"
+    declining_balance_rate: Decimal | None = None
+
+    @field_validator("declining_balance_rate", mode="before")
+    @classmethod
+    def _coerce_declining_rate(cls, value: Decimal | None) -> Decimal | None:
+        if value in (None, "", 0):
+            return None
+        return Decimal(str(value))
+
+    @model_validator(mode="after")
+    def _validate_method(self) -> "CapexPlan":
+        if self.depreciation_method not in {"straight_line", "declining_balance"}:
+            raise ValueError("減価償却法は 'straight_line' または 'declining_balance' を指定してください。")
+        if self.depreciation_method == "declining_balance" and self.declining_balance_rate is not None:
+            if not Decimal("0") < self.declining_balance_rate < Decimal("1"):
+                raise ValueError("定率法の償却率は0より大きく1未満で設定してください。")
+        return self
 
     def annual_depreciation(self) -> Decimal:
+        if self.depreciation_method == "declining_balance" and self.declining_balance_rate is not None:
+            rate = self.declining_balance_rate
+            return sum((item.amount * rate for item in self.items), start=Decimal("0"))
         return sum((item.annual_depreciation() for item in self.items), start=Decimal("0"))
 
     def total_investment(self) -> Decimal:
@@ -161,7 +182,8 @@ class LoanItem(BaseModel):
     interest_rate: Decimal = Field(ge=Decimal("0"), le=Decimal("0.2"))
     term_months: int = Field(ge=1, le=600)
     start_month: MonthIndex
-    repayment_type: Literal["equal_principal", "interest_only"] = "equal_principal"
+    grace_period_months: int = Field(default=0, ge=0, le=600)
+    repayment_type: Literal["equal_principal", "equal_payment", "interest_only"] = "equal_principal"
 
     @field_validator("principal", mode="before")
     @classmethod
@@ -180,6 +202,8 @@ class LoanItem(BaseModel):
     def _ensure_positive_principal(self) -> "LoanItem":
         if self.principal <= 0:
             raise ValueError("借入元本は正の値を入力してください。")
+        if self.grace_period_months < 0 or self.grace_period_months > self.term_months:
+            raise ValueError("据置期間は返済期間以内で設定してください。")
         return self
 
     def annual_interest(self) -> Decimal:
@@ -194,6 +218,32 @@ class LoanSchedule(BaseModel):
 
     def outstanding_principal(self) -> Decimal:
         return sum((loan.principal for loan in self.loans), start=Decimal("0"))
+
+
+class WorkingCapitalAssumptions(BaseModel):
+    """Operational working capital assumptions expressed in turnover days."""
+
+    receivable_days: Decimal = Field(default=Decimal("45"))
+    inventory_days: Decimal = Field(default=Decimal("30"))
+    payable_days: Decimal = Field(default=Decimal("35"))
+
+    @field_validator("receivable_days", "inventory_days", "payable_days", mode="before")
+    @classmethod
+    def _coerce_days(cls, value: Decimal) -> Decimal:
+        return Decimal(str(value))
+
+    @model_validator(mode="after")
+    def _validate_days(self) -> "WorkingCapitalAssumptions":
+        for field_name, value in (
+            ("receivable_days", self.receivable_days),
+            ("inventory_days", self.inventory_days),
+            ("payable_days", self.payable_days),
+        ):
+            if value < Decimal("0"):
+                raise ValueError(f"{field_name} は0以上で入力してください。")
+            if value > Decimal("365"):
+                raise ValueError(f"{field_name} は365日以内で設定してください。")
+        return self
 
 
 class TaxPolicy(BaseModel):
@@ -239,6 +289,7 @@ class FinanceBundle:
     capex: CapexPlan
     loans: LoanSchedule
     tax: TaxPolicy
+    working_capital: WorkingCapitalAssumptions
 
     @classmethod
     def from_dict(cls, data: Dict[str, object]) -> "FinanceBundle":
@@ -248,9 +299,17 @@ class FinanceBundle:
             capex = CapexPlan(**data.get("capex", {}))
             loans = LoanSchedule(**data.get("loans", {}))
             tax = TaxPolicy(**data.get("tax", {}))
+            working_capital = WorkingCapitalAssumptions(**data.get("working_capital", {}))
         except ValidationError as exc:  # pragma: no cover - defensive
             raise ValueError("無効な財務データが含まれています。") from exc
-        return cls(sales=sales, costs=costs, capex=capex, loans=loans, tax=tax)
+        return cls(
+            sales=sales,
+            costs=costs,
+            capex=capex,
+            loans=loans,
+            tax=tax,
+            working_capital=working_capital,
+        )
 
 
 DEFAULT_SALES_PLAN = SalesPlan(
@@ -287,3 +346,4 @@ DEFAULT_COST_PLAN = CostPlan(
 DEFAULT_CAPEX_PLAN = CapexPlan(items=[])
 DEFAULT_LOAN_SCHEDULE = LoanSchedule(loans=[])
 DEFAULT_TAX_POLICY = TaxPolicy()
+DEFAULT_WORKING_CAPITAL = WorkingCapitalAssumptions()

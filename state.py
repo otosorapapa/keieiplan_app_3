@@ -13,6 +13,7 @@ from models import (
     DEFAULT_LOAN_SCHEDULE,
     DEFAULT_SALES_PLAN,
     DEFAULT_TAX_POLICY,
+    DEFAULT_WORKING_CAPITAL,
     FinanceBundle,
 )
 
@@ -112,7 +113,7 @@ def load_finance_bundle() -> Tuple[FinanceBundle, bool]:
     """
 
     models_state: Dict[str, object] = st.session_state.get("finance_models", {})
-    required_keys = {"sales", "costs", "capex", "loans", "tax"}
+    required_keys = {"sales", "costs", "capex", "loans", "tax", "working_capital"}
     if required_keys.issubset(models_state.keys()):
         try:
             bundle = FinanceBundle(
@@ -121,6 +122,7 @@ def load_finance_bundle() -> Tuple[FinanceBundle, bool]:
                 capex=models_state["capex"],
                 loans=models_state["loans"],
                 tax=models_state["tax"],
+                working_capital=models_state["working_capital"],
             )
             return bundle, True
         except Exception:  # pragma: no cover - defensive guard
@@ -132,6 +134,7 @@ def load_finance_bundle() -> Tuple[FinanceBundle, bool]:
         capex=DEFAULT_CAPEX_PLAN.model_copy(deep=True),
         loans=DEFAULT_LOAN_SCHEDULE.model_copy(deep=True),
         tax=DEFAULT_TAX_POLICY.model_copy(deep=True),
+        working_capital=DEFAULT_WORKING_CAPITAL.model_copy(deep=True),
     )
     return default_bundle, False
 

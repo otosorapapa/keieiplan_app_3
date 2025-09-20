@@ -111,6 +111,7 @@ def render_home_page() -> None:
             bundle.tax,
             fte=fte,
             unit=unit,
+            working_capital=bundle.working_capital,
         )
         amounts = compute(plan_cfg)
         metrics = summarize_plan_metrics(amounts)
