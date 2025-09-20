@@ -2,14 +2,20 @@
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import altair as alt
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from calc import compute, generate_cash_flow, plan_from_models, summarize_plan_metrics
+from calc import (
+    FinancialStatements,
+    build_financial_statements,
+    compute,
+    plan_from_models,
+    summarize_plan_metrics,
+)
 from formatting import format_amount_with_unit
 from models import CapexPlan, LoanSchedule, TaxPolicy
 from state import ensure_session_defaults, load_finance_bundle
@@ -73,50 +79,19 @@ def _format_multiple(value: Decimal | float) -> str:
     return f"{quantized}倍"
 
 
-def _compute_fcf(amounts: Dict[str, Decimal], capex: CapexPlan, tax: TaxPolicy) -> Decimal:
-    """Calculate free cash flow using EBIT - taxes + depreciation - CAPEX."""
-
-    ebit = Decimal(amounts.get("OP", Decimal("0")))
-    depreciation = Decimal(amounts.get("OPEX_DEP", Decimal("0")))
-    taxes = tax.effective_tax(Decimal(amounts.get("ORD", Decimal("0"))))
-    capex_total = capex.total_investment()
-    return ebit - taxes + depreciation - capex_total
+def _compute_fcf(statements: FinancialStatements) -> Decimal:
+    operating_cf = statements.annual_cf.get("営業キャッシュフロー", Decimal("0"))
+    investing_cf = statements.annual_cf.get("投資キャッシュフロー", Decimal("0"))
+    return operating_cf + investing_cf
 
 
-def _calculate_dscr(loans: LoanSchedule, operating_cf: Decimal) -> Decimal:
-    """Return the first positive DSCR based on annual debt service."""
-
+def _calculate_dscr(statements: FinancialStatements) -> Decimal:
+    operating_cf = statements.annual_cf.get("営業キャッシュフロー", Decimal("0"))
     if operating_cf <= 0:
         return Decimal("NaN")
-
-    yearly_totals: Dict[int, Dict[str, Decimal]] = {}
-    for loan in loans.loans:
-        principal = Decimal(loan.principal)
-        rate = Decimal(loan.interest_rate)
-        term_months = int(loan.term_months)
-        start_month = int(loan.start_month)
-        repayment_type = str(loan.repayment_type)
-        if principal <= 0 or term_months <= 0:
-            continue
-        outstanding = principal
-        for offset in range(term_months):
-            month_index = start_month + offset
-            year_index = (month_index - 1) // 12 + 1
-            interest = outstanding * rate / Decimal("12")
-            if repayment_type == "equal_principal":
-                principal_payment = principal / Decimal(term_months)
-            else:
-                principal_payment = principal if offset == term_months - 1 else Decimal("0")
-            principal_payment = min(principal_payment, outstanding)
-            outstanding -= principal_payment
-            bucket = yearly_totals.setdefault(
-                year_index, {"interest": Decimal("0"), "principal": Decimal("0")}
-            )
-            bucket["interest"] += interest
-            bucket["principal"] += principal_payment
-
-    for year in sorted(yearly_totals.keys()):
-        debt_service = yearly_totals[year]["interest"] + yearly_totals[year]["principal"]
+    for year in sorted(statements.loan_summary.yearly.keys()):
+        totals = statements.loan_summary.yearly[year]
+        debt_service = totals.get("interest", Decimal("0")) + totals.get("principal", Decimal("0"))
         if debt_service > 0:
             return operating_cf / debt_service
     return Decimal("NaN")
@@ -128,8 +103,11 @@ def _scenario_amounts(
     customers_change: Decimal,
     price_change: Decimal,
     cost_change: Decimal,
-) -> Dict[str, Decimal]:
-    plan = plan_cfg if cost_change == Decimal("0") else plan_cfg.clone()
+) -> Tuple[Dict[str, Decimal], object, Decimal]:
+    from calc.pl import PlanConfig  # avoid circular import in Streamlit runtime
+
+    assert isinstance(plan_cfg, PlanConfig)
+    plan = plan_cfg.clone()
     if cost_change != 0:
         factor = Decimal("1") + cost_change
         for code in COGS_CODES:
@@ -140,7 +118,8 @@ def _scenario_amounts(
             cfg["value"] = current_value * factor
     sales_factor = (Decimal("1") + customers_change) * (Decimal("1") + price_change)
     sales_override = Decimal(plan.base_sales) * sales_factor
-    return compute(plan, sales_override=sales_override)
+    amounts = compute(plan, sales_override=sales_override)
+    return amounts, plan, sales_override
 
 
 def evaluate_scenario(
@@ -155,24 +134,59 @@ def evaluate_scenario(
 ) -> Dict[str, Decimal]:
     """Evaluate a scenario and return core metrics."""
 
-    amounts = _scenario_amounts(
+    amounts, scenario_plan, sales_override = _scenario_amounts(
         plan_cfg,
         customers_change=customers_change,
         price_change=price_change,
         cost_change=cost_change,
     )
     metrics = summarize_plan_metrics(amounts)
-    cf_data = generate_cash_flow(amounts, capex, loans, tax)
-    operating_cf = Decimal(cf_data.get("営業キャッシュフロー", Decimal("0")))
+    statements = getattr(scenario_plan, "latest_statements", None)
+    if statements is None:
+        sales_plan = getattr(scenario_plan, "sales_plan", None)
+        cost_plan = getattr(scenario_plan, "cost_plan", None)
+        capex_plan = getattr(scenario_plan, "capex_plan", None)
+        loan_schedule = getattr(scenario_plan, "loan_schedule", None)
+        tax_policy = getattr(scenario_plan, "tax_policy", None)
+        working_capital = getattr(scenario_plan, "working_capital", None)
+        if working_capital is None:
+            from models import WorkingCapitalAssumptions  # local import to avoid circular deps
+
+            working_capital = WorkingCapitalAssumptions()
+
+        if (
+            sales_plan
+            and cost_plan
+            and capex_plan
+            and loan_schedule
+            and tax_policy
+            and working_capital
+        ):
+            statements = build_financial_statements(
+                sales_plan=sales_plan,
+                cost_plan=cost_plan,
+                capex_plan=capex_plan,
+                loan_schedule=loan_schedule,
+                tax_policy=tax_policy,
+                plan_items=scenario_plan.items,
+                working_capital=working_capital,
+                base_sales=scenario_plan.base_sales,
+                sales_override=sales_override,
+            )
+            scenario_plan.latest_statements = statements
+
+    fcf = _compute_fcf(statements) if statements else Decimal("NaN")
+    dscr = _calculate_dscr(statements) if statements else Decimal("NaN")
     result = {
         "sales": Decimal(amounts.get("REV", Decimal("0"))),
         "gross": Decimal(amounts.get("GROSS", Decimal("0"))),
         "ebit": Decimal(amounts.get("OP", Decimal("0"))),
         "ord": Decimal(amounts.get("ORD", Decimal("0"))),
-        "fcf": _compute_fcf(amounts, capex, tax),
-        "dscr": _calculate_dscr(loans, operating_cf),
+        "fcf": fcf,
+        "dscr": dscr,
         "amounts": amounts,
         "metrics": metrics,
+        "statements": statements,
     }
     return result
 

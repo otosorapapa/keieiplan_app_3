@@ -16,6 +16,7 @@ from models import (
     DEFAULT_LOAN_SCHEDULE,
     DEFAULT_SALES_PLAN,
     DEFAULT_TAX_POLICY,
+    DEFAULT_WORKING_CAPITAL,
     MONTH_SEQUENCE,
 )
 from sample_data import SAMPLE_FISCAL_YEAR, sample_sales_csv_bytes, sample_sales_excel_bytes
@@ -40,6 +41,7 @@ if not finance_raw:
         "capex": DEFAULT_CAPEX_PLAN.model_dump(),
         "loans": DEFAULT_LOAN_SCHEDULE.model_dump(),
         "tax": DEFAULT_TAX_POLICY.model_dump(),
+        "working_capital": DEFAULT_WORKING_CAPITAL.model_dump(),
     }
     st.session_state["finance_raw"] = finance_raw
 
@@ -239,6 +241,7 @@ def _loan_dataframe(data: Dict) -> pd.DataFrame:
                     "金利": 0.01,
                     "返済期間(月)": 60,
                     "開始月": 1,
+                    "据置期間(月)": 0,
                     "返済タイプ": "equal_principal",
                 }
             ]
@@ -252,6 +255,7 @@ def _loan_dataframe(data: Dict) -> pd.DataFrame:
                 "金利": float(Decimal(str(loan.get("interest_rate", 0)))),
                 "返済期間(月)": int(loan.get("term_months", 12)),
                 "開始月": int(loan.get("start_month", 1)),
+                "据置期間(月)": int(loan.get("grace_period_months", 0)),
                 "返済タイプ": loan.get("repayment_type", "equal_principal"),
             }
         )
@@ -268,6 +272,18 @@ except ValueError:
 st.session_state[SALES_TEMPLATE_STATE_KEY] = sales_df
 capex_df = _capex_dataframe(finance_raw.get("capex", {}))
 loan_df = _loan_dataframe(finance_raw.get("loans", {}))
+capex_defaults_raw = finance_raw.get("capex", {})
+capex_method_default = str(capex_defaults_raw.get("depreciation_method", "straight_line"))
+capex_rate_default_value = capex_defaults_raw.get("declining_balance_rate")
+if capex_rate_default_value in (None, ""):
+    capex_rate_default = 0.0
+else:
+    capex_rate_default = float(Decimal(str(capex_rate_default_value)))
+
+wc_defaults = finance_raw.get("working_capital", {})
+receivable_days_default = float(Decimal(str(wc_defaults.get("receivable_days", 45))))
+inventory_days_default = float(Decimal(str(wc_defaults.get("inventory_days", 30))))
+payable_days_default = float(Decimal(str(wc_defaults.get("payable_days", 35))))
 
 costs_defaults = finance_raw.get("costs", {})
 variable_ratios = costs_defaults.get("variable_ratios", {})
@@ -509,16 +525,75 @@ with invest_tab:
             ),
             "返済期間(月)": st.column_config.NumberColumn("返済期間 (月)", min_value=1, max_value=600, step=1),
             "開始月": st.column_config.NumberColumn("開始月", min_value=1, max_value=12, step=1),
-            "返済タイプ": st.column_config.SelectboxColumn("返済タイプ", options=["equal_principal", "interest_only"]),
+            "据置期間(月)": st.column_config.NumberColumn("据置期間 (月)", min_value=0, max_value=600, step=1),
+            "返済タイプ": st.column_config.SelectboxColumn(
+                "返済タイプ", options=["equal_principal", "equal_payment", "interest_only"]
+            ),
         },
         key="loan_editor",
     )
+
+    st.markdown("#### 減価償却設定")
+    method_labels = {"straight_line": "定額法", "declining_balance": "定率法"}
+    method_index = 0 if capex_method_default != "declining_balance" else 1
+    depreciation_method = st.radio(
+        "償却方法",
+        options=["straight_line", "declining_balance"],
+        index=method_index,
+        format_func=lambda key: method_labels.get(key, key),
+        horizontal=True,
+    )
+    declining_rate_input = 0.0
+    if depreciation_method == "declining_balance":
+        default_rate = capex_rate_default if capex_rate_default > 0 else 0.3
+        declining_rate_input = st.number_input(
+            "定率法の償却率",
+            min_value=0.0,
+            max_value=1.0,
+            step=0.01,
+            value=float(default_rate),
+            help="0〜1の範囲で設定します。未入力の場合は耐用年数から自動推計されます。",
+        )
+    st.caption("償却方法の変更はPL/BS/CFに即時反映されます。")
+
+    st.markdown("#### 運転資本回転日数")
+    wc_cols = st.columns(3)
+    with wc_cols[0]:
+        receivable_days_input = st.number_input(
+            "売掛金回転日数 (日)",
+            min_value=0.0,
+            max_value=365.0,
+            step=1.0,
+            value=receivable_days_default,
+        )
+    with wc_cols[1]:
+        inventory_days_input = st.number_input(
+            "棚卸資産回転日数 (日)",
+            min_value=0.0,
+            max_value=365.0,
+            step=1.0,
+            value=inventory_days_default,
+        )
+    with wc_cols[2]:
+        payable_days_input = st.number_input(
+            "買掛金回転日数 (日)",
+            min_value=0.0,
+            max_value=365.0,
+            step=1.0,
+            value=payable_days_default,
+        )
+    st.caption("回転日数は運転資本とキャッシュフローの連動計算に使用します。")
 
     if any(err.field.startswith("capex") for err in validation_errors):
         messages = "<br/>".join(err.message for err in validation_errors if err.field.startswith("capex"))
         st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
     if any(err.field.startswith("loans") for err in validation_errors):
         messages = "<br/>".join(err.message for err in validation_errors if err.field.startswith("loans"))
+        st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
+    if any(err.field.startswith("working_capital") for err in validation_errors):
+        messages = "<br/>".join(
+            err.message for err in validation_errors if err.field.startswith("working_capital")
+        )
         st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
 
 with tax_tab:
@@ -590,6 +665,11 @@ with save_col:
                 if Decimal(str(row.get("金額", 0) if not pd.isna(row.get("金額", 0)) else 0)) > 0
             ]
         }
+        capex_data["depreciation_method"] = depreciation_method
+        if depreciation_method == "declining_balance" and declining_rate_input > 0:
+            capex_data["declining_balance_rate"] = Decimal(str(declining_rate_input))
+        else:
+            capex_data["declining_balance_rate"] = None
 
         loan_data = {
             "loans": [
@@ -610,9 +690,15 @@ with save_col:
                     "start_month": int(
                         row.get("開始月", 1) if not pd.isna(row.get("開始月", 1)) else 1
                     ),
+                    "grace_period_months": int(
+                        row.get("据置期間(月)", 0)
+                        if not pd.isna(row.get("据置期間(月)", 0))
+                        else 0
+                    ),
                     "repayment_type": (
                         row.get("返済タイプ", "equal_principal")
-                        if row.get("返済タイプ", "equal_principal") in {"equal_principal", "interest_only"}
+                        if row.get("返済タイプ", "equal_principal")
+                        in {"equal_principal", "equal_payment", "interest_only"}
                         else "equal_principal"
                     ),
                 }
@@ -621,10 +707,21 @@ with save_col:
             ]
         }
 
+        for loan in loan_data["loans"]:
+            rtype = loan.get("repayment_type", "equal_principal")
+            if rtype not in {"equal_principal", "equal_payment", "interest_only"}:
+                loan["repayment_type"] = "equal_principal"
+
         tax_data = {
             "corporate_tax_rate": Decimal(str(corporate_rate)),
             "consumption_tax_rate": Decimal(str(consumption_rate)),
             "dividend_payout_ratio": Decimal(str(dividend_ratio)),
+        }
+
+        working_capital_data = {
+            "receivable_days": Decimal(str(receivable_days_input)),
+            "inventory_days": Decimal(str(inventory_days_input)),
+            "payable_days": Decimal(str(payable_days_input)),
         }
 
         bundle_dict = {
@@ -633,6 +730,7 @@ with save_col:
             "capex": capex_data,
             "loans": loan_data,
             "tax": tax_data,
+            "working_capital": working_capital_data,
         }
 
         bundle, issues = validate_bundle(bundle_dict)
@@ -648,6 +746,7 @@ with save_col:
                 "capex": bundle.capex,
                 "loans": bundle.loans,
                 "tax": bundle.tax,
+                "working_capital": bundle.working_capital,
             }
             st.session_state["sample_data_loaded"] = False
             st.toast("財務データを保存しました。", icon="✅")

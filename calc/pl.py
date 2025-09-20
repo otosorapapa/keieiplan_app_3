@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from decimal import Decimal, getcontext
-from typing import Dict, List, Tuple
+from typing import Dict
 
 import pandas as pd
 
@@ -12,38 +12,20 @@ from models import (
     LoanSchedule,
     SalesPlan,
     TaxPolicy,
+    WorkingCapitalAssumptions,
 )
 
+from .plan_constants import (
+    COST_CODES,
+    ITEMS,
+    ITEM_LABELS,
+    NOE_CODES,
+    NOI_CODES,
+    OPEX_CODES,
+)
+from .statements import FinancialStatements, build_financial_statements
+
 getcontext().prec = 28
-
-ITEMS: List[Tuple[str, str, str]] = [
-    ("REV", "売上高", "売上"),
-    ("COGS_MAT", "外部仕入｜材料費", "外部仕入"),
-    ("COGS_LBR", "外部仕入｜労務費(外部)", "外部仕入"),
-    ("COGS_OUT_SRC", "外部仕入｜外注費(専属)", "外部仕入"),
-    ("COGS_OUT_CON", "外部仕入｜外注費(委託)", "外部仕入"),
-    ("COGS_OTH", "外部仕入｜その他諸経費", "外部仕入"),
-    ("COGS_TTL", "外部仕入｜計", "外部仕入"),
-    ("GROSS", "粗利(加工高)", "粗利"),
-    ("OPEX_H", "内部費用｜人件費", "内部費用"),
-    ("OPEX_K", "内部費用｜経費", "内部費用"),
-    ("OPEX_DEP", "内部費用｜減価償却費", "内部費用"),
-    ("OPEX_TTL", "内部費用｜計", "内部費用"),
-    ("OP", "営業利益", "損益"),
-    ("NOI_MISC", "営業外収益｜雑収入", "営業外"),
-    ("NOI_GRANT", "営業外収益｜補助金/給付金", "営業外"),
-    ("NOI_OTH", "営業外収益｜その他", "営業外"),
-    ("NOE_INT", "営業外費用｜支払利息", "営業外"),
-    ("NOE_OTH", "営業外費用｜雑損", "営業外"),
-    ("ORD", "経常利益", "損益"),
-    ("BE_SALES", "損益分岐点売上高", "KPI"),
-    ("PC_SALES", "一人当たり売上", "KPI"),
-    ("PC_GROSS", "一人当たり粗利", "KPI"),
-    ("PC_ORD", "一人当たり経常利益", "KPI"),
-    ("LDR", "労働分配率", "KPI"),
-]
-
-ITEM_LABELS = {code: label for code, label, _ in ITEMS}
 
 
 class PlanConfig:
@@ -56,6 +38,13 @@ class PlanConfig:
             self.fte = Decimal("0.0001")
         self.unit = unit
         self.items: Dict[str, Dict[str, object]] = {}
+        self.sales_plan: SalesPlan | None = None
+        self.cost_plan: CostPlan | None = None
+        self.capex_plan: CapexPlan | None = None
+        self.loan_schedule: LoanSchedule | None = None
+        self.tax_policy: TaxPolicy | None = None
+        self.working_capital: WorkingCapitalAssumptions | None = None
+        self.latest_statements: FinancialStatements | None = None
 
     def set_rate(self, code: str, rate: Decimal, rate_base: str = "sales") -> None:
         self.items[code] = {
@@ -81,13 +70,14 @@ class PlanConfig:
     def clone(self) -> "PlanConfig":
         cloned = PlanConfig(self.base_sales, self.fte, self.unit)
         cloned.items = {k: v.copy() for k, v in self.items.items()}
+        cloned.sales_plan = self.sales_plan
+        cloned.cost_plan = self.cost_plan
+        cloned.capex_plan = self.capex_plan
+        cloned.loan_schedule = self.loan_schedule
+        cloned.tax_policy = self.tax_policy
+        cloned.working_capital = self.working_capital
+        cloned.latest_statements = self.latest_statements
         return cloned
-
-
-COST_CODES = ["COGS_MAT", "COGS_LBR", "COGS_OUT_SRC", "COGS_OUT_CON", "COGS_OTH"]
-OPEX_CODES = ["OPEX_H", "OPEX_K", "OPEX_DEP"]
-NOI_CODES = ["NOI_MISC", "NOI_GRANT", "NOI_OTH"]
-NOE_CODES = ["NOE_INT", "NOE_OTH"]
 
 
 def plan_from_models(
@@ -99,6 +89,7 @@ def plan_from_models(
     *,
     fte: Decimal,
     unit: str,
+    working_capital: WorkingCapitalAssumptions | None = None,
 ) -> PlanConfig:
     """Build a :class:`PlanConfig` from typed models."""
 
@@ -107,6 +98,12 @@ def plan_from_models(
 
     base_sales = sales.annual_total()
     plan = PlanConfig(base_sales=base_sales, fte=fte, unit=unit)
+    plan.sales_plan = sales
+    plan.cost_plan = costs
+    plan.capex_plan = capex
+    plan.loan_schedule = loans
+    plan.tax_policy = tax
+    plan.working_capital = working_capital or WorkingCapitalAssumptions()
 
     for code, ratio in costs.variable_ratios.items():
         plan.set_rate(code, Decimal(ratio), rate_base="sales")
@@ -157,10 +154,10 @@ def _line_amount(
     return sales * value
 
 
-def compute(
+def _compute_legacy_amounts(
     plan: PlanConfig,
-    sales_override: Decimal | None = None,
-    amount_overrides: Dict[str, Decimal] | None = None,
+    sales_override: Decimal | None,
+    amount_overrides: Dict[str, Decimal],
 ) -> Dict[str, Decimal]:
     sales = Decimal(plan.base_sales if sales_override is None else sales_override)
     amounts: Dict[str, Decimal] = {code: Decimal("0") for code, *_ in ITEMS}
@@ -201,6 +198,52 @@ def compute(
     amounts["ORD"] = amounts["OP"] + (
         amounts["NOI_MISC"] + amounts["NOI_GRANT"] + amounts["NOI_OTH"]
     ) - (amounts["NOE_INT"] + amounts["NOE_OTH"])
+
+    return amounts
+
+
+def compute(
+    plan: PlanConfig,
+    sales_override: Decimal | None = None,
+    amount_overrides: Dict[str, Decimal] | None = None,
+) -> Dict[str, Decimal]:
+    amount_overrides = dict(amount_overrides or {})
+
+    if (
+        plan.sales_plan
+        and plan.cost_plan
+        and plan.capex_plan
+        and plan.loan_schedule
+        and plan.tax_policy
+        and plan.working_capital
+    ):
+        statements = build_financial_statements(
+            sales_plan=plan.sales_plan,
+            cost_plan=plan.cost_plan,
+            capex_plan=plan.capex_plan,
+            loan_schedule=plan.loan_schedule,
+            tax_policy=plan.tax_policy,
+            plan_items=plan.items,
+            working_capital=plan.working_capital,
+            base_sales=plan.base_sales,
+            sales_override=sales_override,
+            amount_overrides=amount_overrides,
+        )
+        plan.latest_statements = statements
+        amounts: Dict[str, Decimal] = {code: statements.annual_pl.get(code, Decimal("0")) for code, *_ in ITEMS}
+        amounts["COGS_TTL"] = statements.annual_pl.get("COGS_TTL", amounts.get("COGS_TTL", Decimal("0")))
+        amounts["OPEX_TTL"] = statements.annual_pl.get("OPEX_TTL", amounts.get("OPEX_TTL", Decimal("0")))
+        amounts["OP"] = statements.annual_pl.get("OP", amounts.get("OP", Decimal("0")))
+        amounts["NOE_INT"] = statements.annual_pl.get("NOE_INT", amounts.get("NOE_INT", Decimal("0")))
+        amounts["ORD"] = statements.annual_pl.get("ORD", amounts.get("ORD", Decimal("0")))
+        amounts["TAX"] = statements.annual_pl.get("TAX", Decimal("0"))
+        amounts["NET"] = statements.annual_pl.get("NET", Decimal("0"))
+        amounts["DIV"] = statements.annual_pl.get("DIV", Decimal("0"))
+    else:
+        plan.latest_statements = None
+        amounts = _compute_legacy_amounts(plan, sales_override, amount_overrides)
+
+    sales = Decimal(amounts.get("REV", Decimal("0")))
 
     variable_cost = Decimal("0")
     for code in COST_CODES + OPEX_CODES + NOI_CODES + NOE_CODES:

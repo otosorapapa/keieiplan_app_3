@@ -21,6 +21,7 @@ from models import (
     SalesItem,
     SalesPlan,
     TaxPolicy,
+    WorkingCapitalAssumptions,
 )
 
 SAMPLE_FISCAL_YEAR = 2025
@@ -176,7 +177,9 @@ def _build_capex_plan() -> CapexPlan:
                 start_month=1,
                 useful_life_years=3,
             ),
-        ]
+        ],
+        depreciation_method="declining_balance",
+        declining_balance_rate=Decimal("0.36"),
     )
 
 
@@ -189,6 +192,7 @@ def _build_loan_schedule() -> LoanSchedule:
                 interest_rate=Decimal("0.012"),
                 term_months=60,
                 start_month=1,
+                grace_period_months=12,
                 repayment_type="equal_principal",
             ),
             LoanItem(
@@ -197,9 +201,18 @@ def _build_loan_schedule() -> LoanSchedule:
                 interest_rate=Decimal("0.009"),
                 term_months=84,
                 start_month=3,
+                grace_period_months=24,
                 repayment_type="interest_only",
             ),
         ]
+    )
+
+
+def _build_working_capital() -> WorkingCapitalAssumptions:
+    return WorkingCapitalAssumptions(
+        receivable_days=Decimal("45"),
+        inventory_days=Decimal("32"),
+        payable_days=Decimal("50"),
     )
 
 
@@ -220,6 +233,7 @@ def create_sample_bundle() -> FinanceBundle:
         capex=_build_capex_plan(),
         loans=_build_loan_schedule(),
         tax=_build_tax_policy(),
+        working_capital=_build_working_capital(),
     )
 
 
@@ -233,6 +247,7 @@ def sample_finance_raw() -> Dict[str, Dict]:
         "capex": bundle.capex.model_dump(),
         "loans": bundle.loans.model_dump(),
         "tax": bundle.tax.model_dump(),
+        "working_capital": bundle.working_capital.model_dump(),
     }
 
 
