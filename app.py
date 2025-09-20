@@ -5,7 +5,6 @@ import numpy as np
 import io
 import math
 import datetime as dt
-from copy import deepcopy
 from typing import Dict, Tuple, List, Any
 import openpyxl  # noqa: F401  # Ensure Excel engine is available
 import matplotlib as mpl
@@ -309,15 +308,6 @@ status_placeholder = st.empty()
 if "show_usage_guide" not in st.session_state:
     st.session_state["show_usage_guide"] = False
 
-if "input_values" not in st.session_state:
-    st.session_state["input_values"] = deepcopy(FORM_INPUT_DEFAULTS)
-if "validated_values" not in st.session_state:
-    st.session_state["validated_values"] = deepcopy(st.session_state["input_values"])
-if "form_errors" not in st.session_state:
-    st.session_state["form_errors"] = {}
-if "input_mode" not in st.session_state:
-    st.session_state["input_mode"] = st.session_state["input_values"].get("input_mode", INPUT_MODE_OPTIONS[0])
-
 with st.container():
     header_cols = st.columns([4, 1], gap="large")
     with header_cols[0]:
@@ -368,49 +358,6 @@ DEFAULTS = {
     "unit": "百万円",
     "fiscal_year": 2025
 }
-
-INPUT_MODE_OPTIONS = ["％（増減/売上対比）", "実額（円）"]
-UNIT_OPTIONS = ["百万円", "千円", "円"]
-
-FORM_INPUT_DEFAULTS: Dict[str, Any] = {
-    "company_name": "サンプル株式会社",
-    "fiscal_year": DEFAULTS["fiscal_year"],
-    "unit": DEFAULTS["unit"],
-    "base_sales": float(DEFAULTS["sales"]),
-    "fte": float(DEFAULTS["fte"]),
-    "input_mode": INPUT_MODE_OPTIONS[0],
-    "cogs_mat": {"method": "rate", "value": float(DEFAULTS["cogs_mat_rate"])},
-    "cogs_lbr": {"method": "rate", "value": float(DEFAULTS["cogs_lbr_rate"])},
-    "cogs_out_src": {"method": "rate", "value": float(DEFAULTS["cogs_out_src_rate"])},
-    "cogs_out_con": {"method": "rate", "value": float(DEFAULTS["cogs_out_con_rate"])},
-    "cogs_oth": {"method": "rate", "value": float(DEFAULTS["cogs_oth_rate"])},
-    "opex_h": {"method": "rate", "value": float(DEFAULTS["opex_h_rate"])},
-    "opex_k": {"method": "rate", "value": float(DEFAULTS["opex_k_rate"])},
-    "opex_dep": {"method": "rate", "value": float(DEFAULTS["opex_dep_rate"])},
-    "noi_misc": {"method": "rate", "value": float(DEFAULTS["noi_misc_rate"])},
-    "noi_grant": {"method": "rate", "value": float(DEFAULTS["noi_grant_rate"])},
-    "noi_oth": {"method": "rate", "value": float(DEFAULTS["noi_oth_rate"])},
-    "noe_int": {"method": "rate", "value": float(DEFAULTS["noe_int_rate"])},
-    "noe_oth": {"method": "rate", "value": float(DEFAULTS["noe_oth_rate"])},
-}
-
-FORM_FIELD_CODES: Dict[str, str] = {
-    "cogs_mat": "COGS_MAT",
-    "cogs_lbr": "COGS_LBR",
-    "cogs_out_src": "COGS_OUT_SRC",
-    "cogs_out_con": "COGS_OUT_CON",
-    "cogs_oth": "COGS_OTH",
-    "opex_h": "OPEX_H",
-    "opex_k": "OPEX_K",
-    "opex_dep": "OPEX_DEP",
-    "noi_misc": "NOI_MISC",
-    "noi_grant": "NOI_GRANT",
-    "noi_oth": "NOI_OTH",
-    "noe_int": "NOE_INT",
-    "noe_oth": "NOE_OTH",
-}
-
-FORM_COST_KEYS = tuple(FORM_FIELD_CODES.keys())
 
 PLOT_STYLE_DEFAULT: Dict[str, Any] = {
     "figure_bg": THEME_COLORS["surface"],
@@ -1626,7 +1573,7 @@ def dual_input_row(label: str, base_sales: float, *,
                    pct_default: float = 0.0,
                    amount_default: float = 0.0,
                    pct_min: float = 0.0, pct_max: float = 3.0, pct_step: float = 0.005,
-                    help_text: str = "") -> dict:
+                   help_text: str = "") -> dict:
     """
     返り値: {"method": "rate" or "amount", "value": float}
     - mode=="％（増減/売上対比）": 率を編集、実額は参考表示（= rate * base_sales）
@@ -1668,94 +1615,6 @@ def dual_input_row(label: str, base_sales: float, *,
             rate = 0.0
         st.caption(f"率 {rate*100:.0f}%")
         return {"method": "amount", "value": amount}
-
-
-def resolve_form_defaults(values: Dict[str, Any], key: str, base_sales: float) -> Tuple[float, float]:
-    entry = values.get(key, {}) or {}
-    method = entry.get("method", "rate")
-    raw_value = entry.get("value", 0.0)
-    try:
-        value = float(raw_value)
-    except (TypeError, ValueError):
-        value = 0.0
-    if not math.isfinite(value):
-        value = 0.0
-    if method == "amount":
-        amount_default = max(0.0, value)
-        pct_default = (amount_default / base_sales) if base_sales > 0 else 0.0
-    else:
-        pct_default = max(0.0, value)
-        amount_default = max(0.0, base_sales) * pct_default
-    return pct_default, amount_default
-
-
-def validate_form_inputs(values: Dict[str, Any]) -> Dict[str, str]:
-    errors: Dict[str, str] = {}
-
-    company_name = str(values.get("company_name", "")).strip()
-    if not company_name:
-        errors["company_name"] = "会社名を入力してください。"
-
-    fiscal_year_raw = values.get("fiscal_year")
-    try:
-        fiscal_year = int(fiscal_year_raw)
-    except (TypeError, ValueError):
-        fiscal_year = None
-    if fiscal_year is None:
-        errors["fiscal_year"] = "会計年度は半角数字で入力してください。"
-    elif fiscal_year < 2000 or fiscal_year > 2100:
-        errors["fiscal_year"] = "2000〜2100の範囲で設定してください。"
-
-    base_sales = values.get("base_sales")
-    if base_sales is None or not isinstance(base_sales, (int, float)) or not math.isfinite(base_sales):
-        errors["base_sales"] = "売上高には有効な数値を入力してください。"
-    elif base_sales <= 0:
-        errors["base_sales"] = "売上高は0より大きい値を入力してください。"
-
-    fte = values.get("fte")
-    if fte is None or not isinstance(fte, (int, float)) or not math.isfinite(fte):
-        errors["fte"] = "人員数には有効な数値を入力してください。"
-    elif fte <= 0:
-        errors["fte"] = "人員数は0より大きい値を入力してください。"
-
-    for key in FORM_COST_KEYS:
-        entry = values.get(key, {}) or {}
-        raw_value = entry.get("value", 0.0)
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            errors[key] = "数値で入力してください。"
-            continue
-        if not math.isfinite(value):
-            errors[key] = "有効な数値を入力してください。"
-        elif value < 0:
-            errors[key] = "0以上の数値を入力してください。"
-
-    return errors
-
-
-def build_plan_from_values(values: Dict[str, Any]) -> PlanConfig:
-    base_sales = float(values.get("base_sales", DEFAULTS["sales"]))
-    fte = float(values.get("fte", DEFAULTS["fte"]))
-    unit = str(values.get("unit", DEFAULTS["unit"]))
-    plan = PlanConfig(base_sales=base_sales, fte=fte, unit=unit)
-
-    for key, code in FORM_FIELD_CODES.items():
-        entry = values.get(key, {}) or {}
-        method = entry.get("method", "rate")
-        raw_value = entry.get("value", 0.0)
-        try:
-            value = float(raw_value)
-        except (TypeError, ValueError):
-            value = 0.0
-        if not math.isfinite(value):
-            value = 0.0
-        if method == "amount":
-            plan.set_amount(code, value)
-        else:
-            plan.set_rate(code, value, "sales")
-
-    return plan
 
 def compute(plan: PlanConfig, sales_override: float | None = None, amount_overrides: Dict[str, float] | None = None) -> Dict[str, float]:
     S = float(plan.base_sales if sales_override is None else sales_override)
@@ -1885,285 +1744,171 @@ def bisection_for_target_op(plan: PlanConfig, target_op: float, s_low: float, s_
 with st.container():
     st.markdown("## 🧭 マネジメント・コントロールハブ")
     with st.container(border=True):
-        st.caption("率と実額を切り替えながら、フォームで主要レバーをまとめて設定できます。")
-        form_defaults = st.session_state["input_values"]
-        mode_value = st.session_state.get("input_mode", INPUT_MODE_OPTIONS[0])
-        mode_index = INPUT_MODE_OPTIONS.index(mode_value) if mode_value in INPUT_MODE_OPTIONS else 0
-        field_error_placeholders: Dict[str, Any] = {}
+        st.caption("率と実額を切り替えながら、重要な経営レバーを中央エリアで一括コントロールできます。")
+        base_cols = st.columns([2.4, 1.3, 1.3], gap="large")
+        with base_cols[0]:
+            mode = st.radio(
+                "入力モード",
+                ["％（増減/売上対比）", "実額（円）"],
+                horizontal=True,
+                index=0,
+                key="input_mode",
+            )
+            st.caption("％指定で売上に対する構成比を直感的に管理。必要に応じてワンクリックで実額モードへ。")
+        with base_cols[1]:
+            fiscal_year = st.number_input("会計年度", value=int(DEFAULTS["fiscal_year"]), step=1, format="%d")
+            unit = st.selectbox("表示単位", ["百万円", "千円", "円"], index=0, help="計算は円ベース、表示のみ丸めます。")
+        with base_cols[2]:
+            base_sales = st.number_input(
+                "売上高（ベース）",
+                value=float(DEFAULTS["sales"]),
+                step=10_000_000.0,
+                min_value=0.0,
+                format="%.0f",
+            )
+            fte = st.number_input("人員数（FTE換算）", value=float(DEFAULTS["fte"]), step=1.0, min_value=0.0)
 
-        with st.form("input_form"):
-            st.markdown("### 会社 / 基本設定")
-            company_cols = st.columns(2, gap="large")
-            with company_cols[0]:
-                company_name = st.text_input(
-                    "会社名 *必須",
-                    value=form_defaults.get("company_name", "サンプル株式会社"),
-                    help="例: 株式会社未来創造",
-                )
-                field_error_placeholders["company_name"] = st.empty()
-                unit_selected = form_defaults.get("unit", DEFAULTS["unit"])
-                unit_index = UNIT_OPTIONS.index(unit_selected) if unit_selected in UNIT_OPTIONS else 0
-                unit = st.selectbox(
-                    "表示単位",
-                    UNIT_OPTIONS,
-                    index=unit_index,
-                    help="計算は円ベースで行い、表示のみ指定した単位に丸めます。",
-                )
-            with company_cols[1]:
-                fiscal_year = st.number_input(
-                    "会計年度 *必須",
-                    min_value=2000,
-                    max_value=2100,
-                    step=1,
-                    value=int(form_defaults.get("fiscal_year", DEFAULTS["fiscal_year"])),
-                    format="%d",
-                    help="例: 2025",
-                )
-                field_error_placeholders["fiscal_year"] = st.empty()
-                input_mode_value = st.radio(
-                    "入力モード",
-                    INPUT_MODE_OPTIONS,
-                    horizontal=True,
-                    index=mode_index,
-                    key="input_mode",
-                    help="％指定で売上構成比を管理。必要に応じて実額モードへ切替できます。",
-                )
-            st.caption("必須項目には *必須 ラベルと入力例を添えています。")
+        st.markdown("#### 🎚️ コスト & 収益レバー")
+        st.caption("主要コストは3つのタブに整理。カテゴリごとにまとめたカードで、配分バランスを素早く再設計できます。")
+        tab_cost, tab_internal, tab_nonop = st.tabs(["外部仕入", "内部費用", "営業外 / 営業外費用"])
 
-            st.markdown("### 前提条件")
-            assumption_cols = st.columns(2, gap="large")
-            with assumption_cols[0]:
-                base_sales = st.number_input(
-                    "売上高（ベースライン） *必須",
-                    min_value=0.0,
-                    step=10_000_000.0,
-                    value=float(form_defaults.get("base_sales", DEFAULTS["sales"])),
-                    format="%.0f",
-                    help="例: 1000000000（10億円）",
-                )
-                field_error_placeholders["base_sales"] = st.empty()
-            with assumption_cols[1]:
-                fte = st.number_input(
-                    "人員数（FTE換算） *必須",
-                    min_value=0.0,
-                    step=1.0,
-                    value=float(form_defaults.get("fte", DEFAULTS["fte"])),
-                    format="%.1f",
-                    help="例: 25.0",
-                )
-                field_error_placeholders["fte"] = st.empty()
-
-            base_sales_value = float(base_sales) if isinstance(base_sales, (int, float)) else 0.0
-
-            st.markdown("### 売上 / 費用レバー")
-            st.caption("左列で原価と内部費用、右列で営業外項目を設定します。％／実額は上部の切替で調整できます。")
-            finance_cols = st.columns(2, gap="large")
-            with finance_cols[0]:
-                st.markdown("#### 外部仕入")
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "cogs_mat", base_sales_value)
+        with tab_cost:
+            ext_row1 = st.columns(3, gap="large")
+            with ext_row1[0]:
                 cogs_mat_input = dual_input_row(
                     "材料費",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["cogs_mat_rate"]),
+                    amount_default=base_sales * DEFAULTS["cogs_mat_rate"],
                     pct_step=0.01,
-                    help_text="例: 売上高の25%など",
                 )
-                field_error_placeholders["cogs_mat"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "cogs_lbr", base_sales_value)
+            with ext_row1[1]:
                 cogs_lbr_input = dual_input_row(
                     "労務費(外部)",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["cogs_lbr_rate"]),
+                    amount_default=base_sales * DEFAULTS["cogs_lbr_rate"],
                     pct_step=0.01,
-                    help_text="外部スタッフへの人件費です。",
                 )
-                field_error_placeholders["cogs_lbr"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "cogs_out_src", base_sales_value)
+            with ext_row1[2]:
                 cogs_out_src_input = dual_input_row(
                     "外注費(専属)",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["cogs_out_src_rate"]),
+                    amount_default=base_sales * DEFAULTS["cogs_out_src_rate"],
                     pct_step=0.01,
-                    help_text="専属パートナーへの支払いです。",
                 )
-                field_error_placeholders["cogs_out_src"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "cogs_out_con", base_sales_value)
+            ext_row2 = st.columns(2, gap="large")
+            with ext_row2[0]:
                 cogs_out_con_input = dual_input_row(
                     "外注費(委託)",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["cogs_out_con_rate"]),
+                    amount_default=base_sales * DEFAULTS["cogs_out_con_rate"],
                     pct_step=0.01,
-                    help_text="スポット委託時のコストです。",
                 )
-                field_error_placeholders["cogs_out_con"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "cogs_oth", base_sales_value)
+            with ext_row2[1]:
                 cogs_oth_input = dual_input_row(
                     "その他諸経費",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["cogs_oth_rate"]),
+                    amount_default=base_sales * DEFAULTS["cogs_oth_rate"],
                     pct_step=0.005,
-                    help_text="物流費や包材などの付随コスト。",
                 )
-                field_error_placeholders["cogs_oth"] = st.empty()
 
-                st.markdown("#### 内部費用")
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "opex_h", base_sales_value)
+        with tab_internal:
+            int_row = st.columns(3, gap="large")
+            with int_row[0]:
                 opex_h_input = dual_input_row(
                     "人件費",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["opex_h_rate"]),
+                    amount_default=base_sales * DEFAULTS["opex_h_rate"],
                     pct_step=0.01,
-                    help_text="従業員の給与・賞与など。",
                 )
-                field_error_placeholders["opex_h"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "opex_k", base_sales_value)
+            with int_row[1]:
                 opex_k_input = dual_input_row(
                     "経費",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["opex_k_rate"]),
+                    amount_default=base_sales * DEFAULTS["opex_k_rate"],
                     pct_step=0.01,
-                    help_text="販促費やオフィス費用など。",
                 )
-                field_error_placeholders["opex_k"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "opex_dep", base_sales_value)
+            with int_row[2]:
                 opex_dep_input = dual_input_row(
                     "減価償却",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["opex_dep_rate"]),
+                    amount_default=base_sales * DEFAULTS["opex_dep_rate"],
                     pct_step=0.001,
-                    help_text="設備投資を按分した費用です。",
                 )
-                field_error_placeholders["opex_dep"] = st.empty()
 
-            with finance_cols[1]:
-                st.markdown("#### 営業外収益 / 費用")
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "noi_misc", base_sales_value)
+        with tab_nonop:
+            nonop_row1 = st.columns(3, gap="large")
+            with nonop_row1[0]:
                 noi_misc_input = dual_input_row(
                     "営業外収益：雑収入",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["noi_misc_rate"]),
+                    amount_default=base_sales * DEFAULTS["noi_misc_rate"],
                     pct_min=0.0,
                     pct_max=1.0,
                     pct_step=0.0005,
-                    help_text="雑収入や副次的な収益。",
                 )
-                field_error_placeholders["noi_misc"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "noi_grant", base_sales_value)
+            with nonop_row1[1]:
                 noi_grant_input = dual_input_row(
                     "営業外収益：補助金",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["noi_grant_rate"]),
+                    amount_default=base_sales * DEFAULTS["noi_grant_rate"],
                     pct_min=0.0,
                     pct_max=1.0,
                     pct_step=0.0005,
-                    help_text="補助金・給付金など。",
                 )
-                field_error_placeholders["noi_grant"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "noi_oth", base_sales_value)
+            with nonop_row1[2]:
                 noi_oth_input = dual_input_row(
                     "営業外収益：その他",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["noi_oth_rate"]),
+                    amount_default=base_sales * DEFAULTS["noi_oth_rate"],
                     pct_min=0.0,
                     pct_max=1.0,
                     pct_step=0.0005,
-                    help_text="その他の営業外収益。",
                 )
-                field_error_placeholders["noi_oth"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "noe_int", base_sales_value)
+            nonop_row2 = st.columns(2, gap="large")
+            with nonop_row2[0]:
                 noe_int_input = dual_input_row(
                     "営業外費用：支払利息",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["noe_int_rate"]),
+                    amount_default=base_sales * DEFAULTS["noe_int_rate"],
                     pct_min=0.0,
                     pct_max=1.0,
                     pct_step=0.0005,
-                    help_text="借入金に伴う利息支払。",
                 )
-                field_error_placeholders["noe_int"] = st.empty()
-                pct_default, amount_default = resolve_form_defaults(form_defaults, "noe_oth", base_sales_value)
+            with nonop_row2[1]:
                 noe_oth_input = dual_input_row(
                     "営業外費用：雑損",
-                    base_sales_value,
+                    base_sales,
                     mode_key="input_mode",
-                    pct_default=pct_default,
-                    amount_default=amount_default,
+                    pct_default=float(DEFAULTS["noe_oth_rate"]),
+                    amount_default=base_sales * DEFAULTS["noe_oth_rate"],
                     pct_min=0.0,
                     pct_max=1.0,
                     pct_step=0.0005,
-                    help_text="その他の営業外費用。",
                 )
-                field_error_placeholders["noe_oth"] = st.empty()
-
-            submitted = st.form_submit_button("検証して計算")
-
-        if submitted:
-            current_values = {
-                "company_name": company_name.strip(),
-                "fiscal_year": int(fiscal_year),
-                "unit": unit,
-                "base_sales": float(base_sales),
-                "fte": float(fte),
-                "input_mode": input_mode_value,
-                "cogs_mat": cogs_mat_input,
-                "cogs_lbr": cogs_lbr_input,
-                "cogs_out_src": cogs_out_src_input,
-                "cogs_out_con": cogs_out_con_input,
-                "cogs_oth": cogs_oth_input,
-                "opex_h": opex_h_input,
-                "opex_k": opex_k_input,
-                "opex_dep": opex_dep_input,
-                "noi_misc": noi_misc_input,
-                "noi_grant": noi_grant_input,
-                "noi_oth": noi_oth_input,
-                "noe_int": noe_int_input,
-                "noe_oth": noe_oth_input,
-            }
-            st.session_state["input_values"] = deepcopy(current_values)
-            errors = validate_form_inputs(current_values)
-            st.session_state["form_errors"] = errors
-            if errors:
-                status_placeholder.warning("入力に不備があります。赤字の項目を修正してください。")
-            else:
-                st.session_state["form_errors"] = {}
-                st.session_state["validated_values"] = deepcopy(current_values)
-                validated_plan = build_plan_from_values(current_values)
-                with st.spinner("計算中..."):
-                    st.session_state["latest_amounts"] = compute(validated_plan)
-                status_placeholder.success("入力OK。計算を実行します。")
-                st.toast("計算が完了しました")
-
-        current_errors = st.session_state.get("form_errors", {})
-        for key, placeholder in field_error_placeholders.items():
-            message = current_errors.get(key)
-            if message:
-                placeholder.error(message)
-            else:
-                placeholder.empty()
 
     with st.expander("🎨 グラフスタイル", expanded=False):
         st.caption("トルネード図やウォーターフォールなどのビジュアルテーマを、ブランドカラーに合わせて細かく調整できます。")
@@ -2197,21 +1942,37 @@ with st.container():
         "alpha": alpha,
     }
 
-    validated_values = deepcopy(st.session_state.get("validated_values", FORM_INPUT_DEFAULTS))
-    base_plan = build_plan_from_values(validated_values)
-    fiscal_year = int(validated_values.get("fiscal_year", DEFAULTS["fiscal_year"]))
-    unit = validated_values.get("unit", base_plan.unit)
-    company_name = validated_values.get("company_name", "")
-    base_sales = base_plan.base_sales
-    fte = base_plan.fte
+    base_plan = PlanConfig(base_sales=base_sales, fte=fte, unit=unit)
+
+
+    def apply_setting(code: str, result: dict) -> None:
+        if result["method"] == "rate":
+            base_plan.set_rate(code, result["value"], "sales")
+        else:
+            base_plan.set_amount(code, result["value"])
+
+
+    apply_setting("COGS_MAT", cogs_mat_input)
+    apply_setting("COGS_LBR", cogs_lbr_input)
+    apply_setting("COGS_OUT_SRC", cogs_out_src_input)
+    apply_setting("COGS_OUT_CON", cogs_out_con_input)
+    apply_setting("COGS_OTH", cogs_oth_input)
+
+    apply_setting("OPEX_H", opex_h_input)
+    apply_setting("OPEX_K", opex_k_input)
+    apply_setting("OPEX_DEP", opex_dep_input)
+
+    apply_setting("NOI_MISC", noi_misc_input)
+    apply_setting("NOI_GRANT", noi_grant_input)
+    apply_setting("NOI_OTH", noi_oth_input)
+    apply_setting("NOE_INT", noe_int_input)
+    apply_setting("NOE_OTH", noe_oth_input)
 
     sidebar_overrides = st.session_state.get("overrides", {})
     sidebar_amounts = compute(base_plan)
     selected_step = render_sidebar_navigation()
     st.session_state["sidebar_step"] = selected_step
     render_sidebar_overview(sidebar_amounts, unit, fiscal_year, sidebar_overrides)
-    if company_name:
-        st.caption(f"入力対象企業: {company_name}")
 
 st.divider()
 
