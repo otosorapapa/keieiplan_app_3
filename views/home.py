@@ -9,6 +9,12 @@ import streamlit as st
 from calc import compute, plan_from_models, summarize_plan_metrics
 from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle, reset_app_state
+from sample_data import (
+    SAMPLE_FISCAL_YEAR,
+    apply_sample_data_to_session,
+    sample_sales_csv_bytes,
+    sample_sales_excel_bytes,
+)
 from theme import inject_theme
 from ui.chrome import HeaderActions, render_app_footer, render_app_header, render_usage_guide_panel
 
@@ -50,6 +56,7 @@ def render_home_page() -> None:
     fiscal_year = int(settings_state.get("fiscal_year", 2025))
 
     bundle, has_custom_inputs = load_finance_bundle()
+    sample_loaded = bool(st.session_state.get("sample_data_loaded", False))
 
     summary_tab, tutorial_tab = st.tabs(["概要", "チュートリアル"])
 
@@ -57,7 +64,44 @@ def render_home_page() -> None:
         st.subheader("📌 現状サマリー")
 
         if not has_custom_inputs:
-            st.info("入力ページでデータを保存すると、ここに最新のKPIが表示されます。")
+            st.info(
+                "まだ入力データがありません。サンプルを読み込むか、Inputsページで売上・コストなどを登録しましょう。"
+            )
+            prompt_cols = st.columns([1.6, 1, 1])
+            with prompt_cols[0]:
+                if st.button(
+                    "サンプルデータをロード",
+                    use_container_width=True,
+                    type="primary",
+                ):
+                    apply_sample_data_to_session()
+                    st.toast("サンプルデータを読み込みました。各ページが起動済みです。", icon="📦")
+                    st.experimental_rerun()
+            sample_csv = sample_sales_csv_bytes()
+            sample_excel = sample_sales_excel_bytes()
+            with prompt_cols[1]:
+                st.download_button(
+                    "CSVサンプルDL",
+                    data=sample_csv,
+                    file_name=f"sample_sales_{SAMPLE_FISCAL_YEAR}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    key="sample_csv_download_home",
+                )
+            with prompt_cols[2]:
+                st.download_button(
+                    "ExcelサンプルDL",
+                    data=sample_excel,
+                    file_name=f"sample_sales_{SAMPLE_FISCAL_YEAR}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="sample_excel_download_home",
+                )
+            st.caption(
+                "サンプルはカテゴリ・数量・月度（YYYY-MM）を含むデータセットです。オフラインで編集してテンプレートに貼り付けることもできます。"
+            )
+        elif sample_loaded:
+            st.success("サンプルデータを適用中です。Inputsページで自社データに置き換えて保存してください。")
 
         plan_cfg = plan_from_models(
             bundle.sales,

@@ -59,6 +59,7 @@ STATE_SPECS: Dict[str, StateSpec] = {
     "what_if_default_customers": StateSpec(lambda: None, (float, int, type(None)), "顧客数の既定値"),
     "what_if_product_share": StateSpec(lambda: 0.6, (float, int), "製品売上比率の初期値"),
     "what_if_active": StateSpec(lambda: "A", str, "現在アクティブなWhat-ifシナリオ"),
+    "sample_data_loaded": StateSpec(lambda: False, bool, "サンプルデータ適用済みフラグ"),
     "finance_raw": StateSpec(dict, dict, "財務入力フォームの生データ"),
     "finance_models": StateSpec(dict, dict, "検証済みの財務モデル"),
     "finance_settings": StateSpec(
