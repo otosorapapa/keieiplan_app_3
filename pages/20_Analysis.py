@@ -12,13 +12,12 @@ import streamlit as st
 
 from calc import (
     ITEMS,
-    compute,
-    generate_balance_sheet,
-    generate_cash_flow,
-    plan_from_models,
-    summarize_plan_metrics,
+    build_dscr_timeseries_from_timeline,
+    build_fcf_steps_from_timeline,
+    compute_plan_with_timeline,
 )
 from formatting import format_amount_with_unit, format_ratio
+from models import FinanceBundle
 from state import ensure_session_defaults, load_finance_bundle
 from theme import inject_theme
 
@@ -27,66 +26,6 @@ ITEM_LABELS = {code: label for code, label, _ in ITEMS}
 
 def _to_decimal(value: object) -> Decimal:
     return Decimal(str(value))
-
-
-@st.cache_data(show_spinner=False)
-def build_monthly_pl_dataframe(
-    sales_data: Dict[str, object],
-    plan_items: Dict[str, Dict[str, str]],
-    amounts_data: Dict[str, str],
-) -> pd.DataFrame:
-    monthly_sales = {month: Decimal("0") for month in range(1, 13)}
-    for item in sales_data.get("items", []):
-        monthly = item.get("monthly", {})
-        amounts = monthly.get("amounts", [])
-        for idx, month in enumerate(range(1, 13)):
-            value = amounts[idx] if idx < len(amounts) else 0
-            monthly_sales[month] += _to_decimal(value)
-
-    total_sales = _to_decimal(amounts_data.get("REV", "0"))
-    total_gross = _to_decimal(amounts_data.get("GROSS", "0"))
-    gross_ratio = total_gross / total_sales if total_sales else Decimal("0")
-
-    rows: List[Dict[str, float]] = []
-    for month in range(1, 13):
-        sales = monthly_sales.get(month, Decimal("0"))
-        monthly_gross = sales * gross_ratio
-        cogs = Decimal("0")
-        opex = Decimal("0")
-        for code, cfg in plan_items.items():
-            method = str(cfg.get("method", ""))
-            base = str(cfg.get("rate_base", "sales"))
-            value = _to_decimal(cfg.get("value", "0"))
-            if not code.startswith(("COGS", "OPEX")):
-                continue
-            if method == "rate":
-                if base == "gross":
-                    amount = monthly_gross * value
-                elif base == "sales":
-                    amount = sales * value
-                else:
-                    amount = value
-            else:
-                amount = value / Decimal("12")
-            if code.startswith("COGS"):
-                cogs += amount
-            else:
-                opex += amount
-        gross = sales - cogs
-        op = gross - opex
-        gross_margin = gross / sales if sales else Decimal("0")
-        rows.append(
-            {
-                "month": f"{month}月",
-                "売上高": float(sales),
-                "売上原価": float(cogs),
-                "販管費": float(opex),
-                "営業利益": float(op),
-                "粗利": float(gross),
-                "粗利率": float(gross_margin),
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 @st.cache_data(show_spinner=False)
@@ -161,92 +100,33 @@ def build_cvp_dataframe(
 
 
 @st.cache_data(show_spinner=False)
-def build_fcf_steps(
-    amounts_data: Dict[str, str],
-    tax_data: Dict[str, object],
+def compute_plan_and_timeline(
+    sales_data: Dict[str, object],
+    costs_data: Dict[str, object],
     capex_data: Dict[str, object],
     loans_data: Dict[str, object],
-) -> List[Dict[str, float]]:
-    del loans_data  # 不要だがインターフェイスを合わせる
-    ebit = _to_decimal(amounts_data.get("OP", "0"))
-    corporate_rate = _to_decimal(tax_data.get("corporate_tax_rate", "0"))
-    taxes = ebit * corporate_rate if ebit > 0 else Decimal("0")
-    depreciation = _to_decimal(amounts_data.get("OPEX_DEP", "0"))
-    working_capital = Decimal("0")
-    capex_total = sum(
-        (_to_decimal(item.get("amount", "0")) for item in capex_data.get("items", [])),
-        start=Decimal("0"),
+    tax_data: Dict[str, object],
+    fte_value: float,
+    unit: str,
+    horizon_years: int,
+) -> Tuple["PlanConfig", Dict[str, Decimal], Dict[str, Decimal], "FinancialTimeline"]:
+    bundle = FinanceBundle.from_dict(
+        {
+            "sales": sales_data,
+            "costs": costs_data,
+            "capex": capex_data,
+            "loans": loans_data,
+            "tax": tax_data,
+        }
     )
-    fcf = ebit - taxes + depreciation - working_capital - capex_total
-    return [
-        {"name": "EBIT", "value": float(ebit)},
-        {"name": "税金", "value": float(-taxes)},
-        {"name": "減価償却", "value": float(depreciation)},
-        {"name": "運転資本", "value": float(-working_capital)},
-        {"name": "CAPEX", "value": float(-capex_total)},
-        {"name": "FCF", "value": float(fcf)},
-    ]
+    plan_cfg, amounts, metrics, timeline = compute_plan_with_timeline(
+        bundle,
+        fte=Decimal(str(fte_value)),
+        unit=unit,
+        horizon_years=horizon_years,
+    )
+    return plan_cfg, amounts, metrics, timeline
 
-
-@st.cache_data(show_spinner=False)
-def build_dscr_timeseries(
-    loans_data: Dict[str, object], operating_cf_value: str
-) -> pd.DataFrame:
-    operating_cf = _to_decimal(operating_cf_value)
-    if operating_cf < 0:
-        operating_cf = Decimal("0")
-    records: List[Dict[str, object]] = []
-    for loan in loans_data.get("loans", []):
-        principal = _to_decimal(loan.get("principal", "0"))
-        rate = _to_decimal(loan.get("interest_rate", "0"))
-        term_months = int(loan.get("term_months", 0))
-        start_month = int(loan.get("start_month", 1))
-        repayment_type = str(loan.get("repayment_type", "equal_principal"))
-        if term_months <= 0 or principal <= 0:
-            continue
-        outstanding = principal
-        for offset in range(term_months):
-            month_index = start_month + offset
-            year_index = (month_index - 1) // 12 + 1
-            interest = outstanding * rate / Decimal("12")
-            if repayment_type == "equal_principal":
-                principal_payment = principal / Decimal(term_months)
-            else:
-                principal_payment = principal if offset == term_months - 1 else Decimal("0")
-            principal_payment = min(principal_payment, outstanding)
-            ending = outstanding - principal_payment
-            records.append(
-                {
-                    "year": year_index,
-                    "interest": interest,
-                    "principal": principal_payment,
-                    "out_start": outstanding,
-                    "out_end": ending,
-                }
-            )
-            outstanding = ending
-
-    if not records:
-        return pd.DataFrame()
-
-    grouped_rows: List[Dict[str, float]] = []
-    for year, group in pd.DataFrame(records).groupby("year"):
-        interest_total = sum(group["interest"], start=Decimal("0"))
-        principal_total = sum(group["principal"], start=Decimal("0"))
-        outstanding_start = group["out_start"].iloc[0]
-        debt_service = interest_total + principal_total
-        dscr = operating_cf / debt_service if debt_service > 0 else Decimal("NaN")
-        payback_years = (
-            outstanding_start / operating_cf if operating_cf > 0 else Decimal("NaN")
-        )
-        grouped_rows.append(
-            {
-                "年度": f"FY{year}",
-                "DSCR": float(dscr),
-                "債務償還年数": float(payback_years),
-            }
-        )
-    return pd.DataFrame(grouped_rows)
 
 st.set_page_config(
     page_title="経営計画スタジオ｜Analysis",
@@ -266,20 +146,22 @@ bundle, has_custom_inputs = load_finance_bundle()
 if not has_custom_inputs:
     st.info("Inputsページでデータを保存すると、分析結果が更新されます。以下は既定値サンプルです。")
 
-plan_cfg = plan_from_models(
-    bundle.sales,
-    bundle.costs,
-    bundle.capex,
-    bundle.loans,
-    bundle.tax,
-    fte=fte,
-    unit=unit,
-)
+sales_dump = bundle.sales.model_dump(mode="json")
+costs_dump = bundle.costs.model_dump(mode="json")
+capex_dump = bundle.capex.model_dump(mode="json")
+loans_dump = bundle.loans.model_dump(mode="json")
+tax_dump = bundle.tax.model_dump(mode="json")
 
-amounts = compute(plan_cfg)
-metrics = summarize_plan_metrics(amounts)
-bs_data = generate_balance_sheet(amounts, bundle.capex, bundle.loans, bundle.tax)
-cf_data = generate_cash_flow(amounts, bundle.capex, bundle.loans, bundle.tax)
+plan_cfg, amounts, metrics, timeline = compute_plan_and_timeline(
+    sales_dump,
+    costs_dump,
+    capex_dump,
+    loans_dump,
+    tax_dump,
+    float(fte),
+    unit,
+    horizon_years=15,
+)
 
 plan_items_serialized = {
     code: {
@@ -289,20 +171,19 @@ plan_items_serialized = {
     }
     for code, cfg in plan_cfg.items.items()
 }
-sales_dump = bundle.sales.model_dump(mode="json")
 amounts_serialized = {code: str(value) for code, value in amounts.items()}
-capex_dump = bundle.capex.model_dump(mode="json")
-loans_dump = bundle.loans.model_dump(mode="json")
-tax_dump = bundle.tax.model_dump(mode="json")
-
-monthly_pl_df = build_monthly_pl_dataframe(sales_dump, plan_items_serialized, amounts_serialized)
+monthly_pl_df = timeline.monthly_pl.copy()
+monthly_pl_df = monthly_pl_df[monthly_pl_df["year_index"] == 1].copy()
+monthly_pl_df["month"] = monthly_pl_df["calendar_month"].apply(lambda m: f"{int(m)}月")
 cost_df = build_cost_composition(amounts_serialized)
 cvp_df, variable_rate, fixed_cost, breakeven_sales = build_cvp_dataframe(
     plan_items_serialized, amounts_serialized
 )
-fcf_steps = build_fcf_steps(amounts_serialized, tax_dump, capex_dump, loans_dump)
-operating_cf_str = str(cf_data.get("営業キャッシュフロー", Decimal("0")))
-dscr_df = build_dscr_timeseries(loans_dump, operating_cf_str)
+fcf_steps = build_fcf_steps_from_timeline(timeline)
+dscr_df = build_dscr_timeseries_from_timeline(timeline, timeline.annual_cf)
+annual_cf_df = timeline.annual_cf.copy()
+annual_bs_df = timeline.annual_bs.copy()
+annual_pl_df = timeline.annual_pl.copy()
 
 st.title("📈 KPI・損益分析")
 st.caption(f"FY{fiscal_year} / 表示単位: {unit} / FTE: {fte}")
@@ -503,29 +384,40 @@ with be_tab:
     )
 
     st.markdown("### バランスシートのスナップショット")
-    bs_rows = []
-    for section, records in (("資産", bs_data["assets"]), ("負債・純資産", bs_data["liabilities"])):
-        for name, value in records.items():
-            bs_rows.append({"区分": section, "項目": name, "金額": float(value)})
-    bs_df = pd.DataFrame(bs_rows)
-    st.dataframe(bs_df, use_container_width=True, hide_index=True)
+    if not annual_bs_df.empty:
+        bs_display = annual_bs_df.drop(columns=["year_index"], errors="ignore").copy()
+        st.dataframe(bs_display, use_container_width=True, hide_index=True)
+    else:
+        st.info("バランスシートを表示するためのデータが不足しています。")
 
 with cash_tab:
     st.subheader("キャッシュフロー")
-    cf_rows = [{"区分": key, "金額": float(value)} for key, value in cf_data.items()]
-    cf_df = pd.DataFrame(cf_rows)
-    st.dataframe(cf_df, use_container_width=True, hide_index=True)
+    if not annual_cf_df.empty:
+        cf_display = annual_cf_df.drop(columns=["year_index"], errors="ignore").copy()
+        st.dataframe(cf_display, use_container_width=True, hide_index=True)
 
-    cf_fig = go.Figure(
-        go.Bar(
-            x=cf_df['区分'],
-            y=cf_df['金額'],
-            marker_color='#636EFA',
-            hovertemplate='%{x}: ¥%{y:,.0f}<extra></extra>',
-        )
-    )
-    cf_fig.update_layout(showlegend=False, yaxis_title='金額 (円)')
-    st.plotly_chart(cf_fig, use_container_width=True)
+        cf_fig = go.Figure()
+        cf_colors = {
+            "営業CF": "#636EFA",
+            "投資CF": "#EF553B",
+            "財務CF": "#00CC96",
+            "フリーCF": "#AB63FA",
+        }
+        for column, color in cf_colors.items():
+            if column in cf_display.columns:
+                cf_fig.add_trace(
+                    go.Bar(
+                        name=column,
+                        x=cf_display["年度"],
+                        y=cf_display[column],
+                        marker_color=color,
+                        hovertemplate="年度=%{x}<br>" + column + "=¥%{y:,.0f}<extra></extra>",
+                    )
+                )
+        cf_fig.update_layout(barmode="group", yaxis_title="金額 (円)", legend_title_text="")
+        st.plotly_chart(cf_fig, use_container_width=True)
+    else:
+        st.info("キャッシュフローを表示するデータがありません。")
 
     st.markdown('### DSCR / 債務償還年数')
     if not dscr_df.empty:
@@ -559,4 +451,4 @@ with cash_tab:
     else:
         st.info('借入データが未登録のため、DSCRを算出できません。')
 
-    st.caption("営業CFには減価償却費を足し戻し、税引後利益を反映しています。投資CFはCapex、財務CFは利息支払を表します。")
+    st.caption("営業CFには減価償却費を足し戻し、税引後利益を反映しています。投資CFはCAPEX、財務CFは利息・元本・配当を表します。")

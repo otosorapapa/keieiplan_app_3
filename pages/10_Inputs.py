@@ -212,7 +212,15 @@ def _capex_dataframe(data: Dict) -> pd.DataFrame:
     items = data.get("items", [])
     if not items:
         return pd.DataFrame(
-            [{"投資名": "新工場設備", "金額": 0.0, "開始月": 1, "耐用年数": 5}]
+            [
+                {
+                    "投資名": "新工場設備",
+                    "金額": 0.0,
+                    "開始月": 1,
+                    "耐用年数": 5,
+                    "償却法": "straight_line",
+                }
+            ]
         )
     rows = []
     for item in items:
@@ -222,6 +230,7 @@ def _capex_dataframe(data: Dict) -> pd.DataFrame:
                 "金額": float(Decimal(str(item.get("amount", 0)))),
                 "開始月": int(item.get("start_month", 1)),
                 "耐用年数": int(item.get("useful_life_years", 5)),
+                "償却法": item.get("depreciation_method", "straight_line"),
             }
         )
     return pd.DataFrame(rows)
@@ -239,6 +248,7 @@ def _loan_dataframe(data: Dict) -> pd.DataFrame:
                     "返済期間(月)": 60,
                     "開始月": 1,
                     "返済タイプ": "equal_principal",
+                    "据置月数": 0,
                 }
             ]
         )
@@ -252,6 +262,7 @@ def _loan_dataframe(data: Dict) -> pd.DataFrame:
                 "返済期間(月)": int(loan.get("term_months", 12)),
                 "開始月": int(loan.get("start_month", 1)),
                 "返済タイプ": loan.get("repayment_type", "equal_principal"),
+                "据置月数": int(loan.get("grace_months", 0)),
             }
         )
     return pd.DataFrame(rows)
@@ -273,6 +284,7 @@ variable_ratios = costs_defaults.get("variable_ratios", {})
 fixed_costs = costs_defaults.get("fixed_costs", {})
 noi_defaults = costs_defaults.get("non_operating_income", {})
 noe_defaults = costs_defaults.get("non_operating_expenses", {})
+working_capital_defaults = costs_defaults.get("working_capital_days", {})
 
 settings_state: Dict[str, object] = st.session_state.get("finance_settings", {})
 unit = str(settings_state.get("unit", "百万円"))
@@ -452,6 +464,35 @@ with cost_tab:
                 step=1.0,
             )
 
+    st.markdown("#### 運転資本回転日数")
+    wc_cols = st.columns(3)
+    working_capital_inputs: Dict[str, float] = {}
+    with wc_cols[0]:
+        working_capital_inputs["receivables"] = st.number_input(
+            "売掛金回転 (日)",
+            min_value=0.0,
+            max_value=365.0,
+            value=float(working_capital_defaults.get("receivables", 45)),
+            step=1.0,
+        )
+    with wc_cols[1]:
+        working_capital_inputs["inventory"] = st.number_input(
+            "棚卸資産回転 (日)",
+            min_value=0.0,
+            max_value=365.0,
+            value=float(working_capital_defaults.get("inventory", 60)),
+            step=1.0,
+        )
+    with wc_cols[2]:
+        working_capital_inputs["payables"] = st.number_input(
+            "買掛金回転 (日)",
+            min_value=0.0,
+            max_value=365.0,
+            value=float(working_capital_defaults.get("payables", 45)),
+            step=1.0,
+        )
+    st.caption("回転日数は運転資本の増減を計算するために利用します。")
+
     if any(err.field.startswith("costs") for err in validation_errors):
         messages = "<br/>".join(err.message for err in validation_errors if err.field.startswith("costs"))
         st.markdown(f"<div class='field-error'>{messages}</div>", unsafe_allow_html=True)
@@ -469,6 +510,11 @@ with invest_tab:
             ),
             "開始月": st.column_config.NumberColumn("開始月", min_value=1, max_value=12, step=1),
             "耐用年数": st.column_config.NumberColumn("耐用年数 (年)", min_value=1, max_value=20, step=1),
+            "償却法": st.column_config.SelectboxColumn(
+                "償却法",
+                options=["straight_line", "declining"],
+                format_func=lambda x: "定額法" if x == "straight_line" else "定率法",
+            ),
         },
         key="capex_editor",
     )
@@ -488,6 +534,7 @@ with invest_tab:
             "返済期間(月)": st.column_config.NumberColumn("返済期間 (月)", min_value=1, max_value=600, step=1),
             "開始月": st.column_config.NumberColumn("開始月", min_value=1, max_value=12, step=1),
             "返済タイプ": st.column_config.SelectboxColumn("返済タイプ", options=["equal_principal", "interest_only"]),
+            "据置月数": st.column_config.NumberColumn("据置月数", min_value=0, max_value=120, step=1),
         },
         key="loan_editor",
     )
@@ -553,30 +600,56 @@ with save_col:
             "fixed_costs": {code: Decimal(str(value)) * unit_factor for code, value in fixed_inputs.items()},
             "non_operating_income": {code: Decimal(str(value)) * unit_factor for code, value in noi_inputs.items()},
             "non_operating_expenses": {code: Decimal(str(value)) * unit_factor for code, value in noe_inputs.items()},
+            "working_capital_days": {
+                key: Decimal(str(value)) for key, value in working_capital_inputs.items()
+            },
         }
 
-        capex_data = {
-            "items": [
+        capex_items: List[Dict[str, Decimal | str | int]] = []
+        for _, row in capex_df.iterrows():
+            amount_raw = row.get("金額", 0)
+            amount = Decimal(str(amount_raw if not pd.isna(amount_raw) else 0))
+            if amount <= 0:
+                continue
+            method_raw = str(row.get("償却法", "straight_line"))
+            method = method_raw.strip() or "straight_line"
+            if method not in {"straight_line", "declining"}:
+                method = "straight_line"
+            capex_items.append(
                 {
-                    "name": ("" if pd.isna(row.get("投資名", "")) else str(row.get("投資名", ""))).strip()
-                    or "未設定",
-                    "amount": Decimal(str(row.get("金額", 0) if not pd.isna(row.get("金額", 0)) else 0)),
-                    "start_month": int(row.get("開始月", 1) if not pd.isna(row.get("開始月", 1)) else 1),
-                    "useful_life_years": int(row.get("耐用年数", 5) if not pd.isna(row.get("耐用年数", 5)) else 5),
-                }
-                for _, row in capex_df.iterrows()
-                if Decimal(str(row.get("金額", 0) if not pd.isna(row.get("金額", 0)) else 0)) > 0
-            ]
-        }
-
-        loan_data = {
-            "loans": [
-                {
-                    "name": ("" if pd.isna(row.get("名称", "")) else str(row.get("名称", ""))).strip()
-                    or "借入",
-                    "principal": Decimal(
-                        str(row.get("元本", 0) if not pd.isna(row.get("元本", 0)) else 0)
+                    "name": (
+                        ("" if pd.isna(row.get("投資名", "")) else str(row.get("投資名", ""))).strip()
+                        or "未設定"
                     ),
+                    "amount": amount,
+                    "start_month": int(
+                        row.get("開始月", 1) if not pd.isna(row.get("開始月", 1)) else 1
+                    ),
+                    "useful_life_years": int(
+                        row.get("耐用年数", 5) if not pd.isna(row.get("耐用年数", 5)) else 5
+                    ),
+                    "depreciation_method": method,
+                }
+            )
+        capex_data = {"items": capex_items}
+
+        loan_entries: List[Dict[str, Decimal | str | int]] = []
+        for _, row in loan_df.iterrows():
+            principal_raw = row.get("元本", 0)
+            principal = Decimal(str(principal_raw if not pd.isna(principal_raw) else 0))
+            if principal <= 0:
+                continue
+            grace_raw = row.get("据置月数", 0)
+            grace_months = int(grace_raw if not pd.isna(grace_raw) else 0)
+            if grace_months < 0:
+                grace_months = 0
+            loan_entries.append(
+                {
+                    "name": (
+                        ("" if pd.isna(row.get("名称", "")) else str(row.get("名称", ""))).strip()
+                        or "借入"
+                    ),
+                    "principal": principal,
                     "interest_rate": Decimal(
                         str(row.get("金利", 0) if not pd.isna(row.get("金利", 0)) else 0)
                     ),
@@ -593,11 +666,10 @@ with save_col:
                         if row.get("返済タイプ", "equal_principal") in {"equal_principal", "interest_only"}
                         else "equal_principal"
                     ),
+                    "grace_months": grace_months,
                 }
-                for _, row in loan_df.iterrows()
-                if Decimal(str(row.get("元本", 0) if not pd.isna(row.get("元本", 0)) else 0)) > 0
-            ]
-        }
+            )
+        loan_data = {"loans": loan_entries}
 
         tax_data = {
             "corporate_tax_rate": Decimal(str(corporate_rate)),

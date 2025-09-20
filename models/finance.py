@@ -82,6 +82,13 @@ class CostPlan(BaseModel):
     gross_linked_ratios: Dict[str, Decimal] = Field(default_factory=dict)
     non_operating_income: Dict[str, Decimal] = Field(default_factory=dict)
     non_operating_expenses: Dict[str, Decimal] = Field(default_factory=dict)
+    working_capital_days: Dict[str, Decimal] = Field(
+        default_factory=lambda: {
+            "receivables": Decimal("45"),
+            "inventory": Decimal("60"),
+            "payables": Decimal("45"),
+        }
+    )
 
     @field_validator("variable_ratios", "gross_linked_ratios", mode="before")
     @classmethod
@@ -97,6 +104,17 @@ class CostPlan(BaseModel):
     def _coerce_amount_dict(cls, value: Dict[str, Decimal] | None) -> Dict[str, Decimal]:
         if value is None:
             return {}
+        return {str(k): Decimal(str(v)) for k, v in value.items()}
+
+    @field_validator("working_capital_days", mode="before")
+    @classmethod
+    def _coerce_wc_dict(cls, value: Dict[str, Decimal] | None) -> Dict[str, Decimal]:
+        if value is None:
+            return {
+                "receivables": Decimal("45"),
+                "inventory": Decimal("60"),
+                "payables": Decimal("45"),
+            }
         return {str(k): Decimal(str(v)) for k, v in value.items()}
 
     @model_validator(mode="after")
@@ -116,6 +134,18 @@ class CostPlan(BaseModel):
             for code, amount in amounts.items():
                 if amount < Decimal("0"):
                     raise ValueError(f"{label} の '{code}' は0以上の金額を入力してください。")
+        for key, days in self.working_capital_days.items():
+            if days < Decimal("0"):
+                raise ValueError(f"working_capital_days の '{key}' は0以上で入力してください。")
+        # fill defaults for missing keys to keep downstream calculations safe
+        defaults = {
+            "receivables": Decimal("45"),
+            "inventory": Decimal("60"),
+            "payables": Decimal("45"),
+        }
+        for key, default in defaults.items():
+            if key not in self.working_capital_days:
+                self.working_capital_days[key] = default
         return self
 
 
@@ -126,6 +156,7 @@ class CapexItem(BaseModel):
     amount: Decimal
     start_month: MonthIndex
     useful_life_years: int = Field(ge=1, le=20)
+    depreciation_method: Literal["straight_line", "declining"] = "straight_line"
 
     @field_validator("amount", mode="before")
     @classmethod
@@ -162,6 +193,7 @@ class LoanItem(BaseModel):
     term_months: int = Field(ge=1, le=600)
     start_month: MonthIndex
     repayment_type: Literal["equal_principal", "interest_only"] = "equal_principal"
+    grace_months: int = Field(default=0, ge=0, le=120)
 
     @field_validator("principal", mode="before")
     @classmethod
@@ -180,6 +212,9 @@ class LoanItem(BaseModel):
     def _ensure_positive_principal(self) -> "LoanItem":
         if self.principal <= 0:
             raise ValueError("借入元本は正の値を入力してください。")
+        if self.grace_months >= self.term_months:
+            # keep at least one amortising period to avoid division by zero
+            self.grace_months = max(0, self.term_months - 1)
         return self
 
     def annual_interest(self) -> Decimal:
@@ -281,6 +316,11 @@ DEFAULT_COST_PLAN = CostPlan(
     },
     non_operating_expenses={
         "NOE_INT": Decimal("7400000"),
+    },
+    working_capital_days={
+        "receivables": Decimal("45"),
+        "inventory": Decimal("60"),
+        "payables": Decimal("45"),
     },
 )
 
