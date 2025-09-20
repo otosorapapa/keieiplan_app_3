@@ -18,6 +18,7 @@ from models import (
     DEFAULT_TAX_POLICY,
     MONTH_SEQUENCE,
 )
+from sample_data import SAMPLE_FISCAL_YEAR, sample_sales_csv_bytes, sample_sales_excel_bytes
 from state import ensure_session_defaults
 from theme import inject_theme
 from validators import ValidationIssue, validate_bundle
@@ -281,6 +282,9 @@ unit_factor = UNIT_FACTORS.get(unit, Decimal("1"))
 st.title("🧾 データ入力ハブ")
 st.caption("売上からコスト、投資、借入、税制までを一箇所で整理します。保存すると全ページに反映されます。")
 
+if st.session_state.get("sample_data_loaded"):
+    st.success("サンプルデータを基に入力が設定されています。自社データに差し替えて保存しましょう。")
+
 sales_tab, cost_tab, invest_tab, tax_tab = st.tabs(
     ["売上計画", "コスト計画", "投資・借入", "税制・メモ"]
 )
@@ -393,6 +397,24 @@ with sales_tab:
 
     with guide_col:
         _render_sales_guide_panel()
+        st.markdown("#### サンプルデータ")
+        st.caption("カテゴリ別売上・数量・月度（YYYY-MM）を含むCSV/XLSXをダウンロードできます。")
+        st.download_button(
+            "CSVサンプルDL",
+            data=sample_sales_csv_bytes(),
+            file_name=f"sample_sales_{SAMPLE_FISCAL_YEAR}.csv",
+            mime="text/csv",
+            use_container_width=True,
+            key="sample_csv_download_inputs",
+        )
+        st.download_button(
+            "ExcelサンプルDL",
+            data=sample_sales_excel_bytes(),
+            file_name=f"sample_sales_{SAMPLE_FISCAL_YEAR}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            key="sample_excel_download_inputs",
+        )
 
 with cost_tab:
     st.subheader("コスト計画：変動費と固定費")
@@ -627,6 +649,7 @@ with save_col:
                 "loans": bundle.loans,
                 "tax": bundle.tax,
             }
+            st.session_state["sample_data_loaded"] = False
             st.toast("財務データを保存しました。", icon="✅")
 
 with summary_col:
