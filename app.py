@@ -1,5 +1,12 @@
 
 import streamlit as st
+
+st.set_page_config(
+    page_title="経営計画スタジオ",
+    page_icon="📊",
+    layout="wide",
+)
+
 import pandas as pd
 import numpy as np
 import io
@@ -15,11 +22,8 @@ from matplotlib.ticker import FuncFormatter
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
 
-st.set_page_config(
-    page_title="経営計画アプリ",
-    page_icon="📊",
-    layout="wide",
-)
+from state import ensure_session_defaults, reset_app_state
+from ui.chrome import HeaderActions, render_app_footer, render_app_header, render_usage_guide_panel
 
 THEME_COLORS: Dict[str, str] = {
     "background": "#F7F9FB",
@@ -304,28 +308,23 @@ div[data-testid="stDataFrame"] table tbody tr:hover {{
 
 st.markdown(CUSTOM_STYLE, unsafe_allow_html=True)
 
+ensure_session_defaults()
+
 status_placeholder = st.empty()
 
-if "show_usage_guide" not in st.session_state:
-    st.session_state["show_usage_guide"] = False
+header_actions: HeaderActions = render_app_header(
+    title="経営計画スタジオ",
+    subtitle="入力→検証→分析→可視化→出力をスムーズに。初めてでも迷わない設計。",
+)
 
-with st.container():
-    header_cols = st.columns([4, 1], gap="large")
-    with header_cols[0]:
-        st.title("経営計画アプリ")
-        st.caption("入力→検証→分析→可視化→出力をスムーズに。初めてでも迷わない設計。")
-    with header_cols[1]:
-        if st.button("使い方ガイド", use_container_width=True):
-            st.session_state["show_usage_guide"] = not st.session_state["show_usage_guide"]
+if header_actions.reset_requested:
+    reset_app_state()
+    st.experimental_rerun()
 
-guide_placeholder = st.container()
-if st.session_state.get("show_usage_guide"):
-    with guide_placeholder.expander("3ステップ活用ガイド", expanded=True):
-        st.markdown(
-            "1. **入力を整える**: コントロールハブで売上・コストのレバーと会計年度、FTEを設定します。\n"
-            "2. **検証と分析**: シナリオ/感応度タブで前提を比較し、AIインサイトでチェックポイントを確認します。\n"
-            "3. **可視化と出力**: グラフや表で可視化し、エクスポートタブからExcelをダウンロードして共有します。"
-        )
+if header_actions.toggled_help:
+    st.session_state["show_usage_guide"] = not st.session_state.get("show_usage_guide", False)
+
+render_usage_guide_panel()
 
 with st.container():
     st.markdown(
@@ -3050,6 +3049,4 @@ with status_placeholder.container():
         unsafe_allow_html=True,
     )
 
-st.divider()
-
-st.caption("© 経営計画策定WEBアプリ（Streamlit版） | 表示単位と計算単位を分離し、丸めの影響を最小化しています。")
+render_app_footer()
