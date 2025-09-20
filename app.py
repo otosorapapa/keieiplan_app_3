@@ -6,13 +6,13 @@ import io
 import math
 import datetime as dt
 from typing import Dict, Tuple, List, Any
+import altair as alt
 import openpyxl  # noqa: F401  # Ensure Excel engine is available
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 from openpyxl.styles import Font, Alignment
 from openpyxl.utils import get_column_letter
-import plotly.graph_objects as go
 
 st.set_page_config(
     page_title="経営計画アプリ",
@@ -872,6 +872,80 @@ def format_amount_with_unit(value: float, unit: str) -> str:
 
     formatted = format_money(value, unit)
     return formatted if formatted == "—" else f"{formatted} {unit}"
+
+
+def _format_amount_delta(value: float, unit: str) -> str:
+    if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return "±0"
+    if abs(value) < 1e-6:
+        return "±0"
+    sign = "+" if value > 0 else "-"
+    text = format_amount_with_unit(abs(value), unit)
+    return f"{sign}{text}"
+
+
+def _format_ratio_delta(value: float) -> str:
+    if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return "±0"
+    if abs(value) < 1e-4:
+        return "±0"
+    return f"{value * 100:+.1f}pt"
+
+
+def get_metric_delta(key: str, current: float, *, unit: str, kind: str = "amount") -> str:
+    """セッションに保持した直前値との差分を整形して返す。"""
+
+    history = st.session_state.setdefault("kpi_history", {})
+    previous = history.get(key)
+    delta_text = "±0"
+    if previous is not None:
+        diff = current - previous
+        if kind == "ratio":
+            delta_text = _format_ratio_delta(diff)
+        else:
+            delta_text = _format_amount_delta(diff, unit)
+    history[key] = current
+    st.session_state["kpi_history"] = history
+    return delta_text
+
+
+def update_metric_timeline(amounts: Dict[str, float]) -> None:
+    """KPIスナップショットの推移をセッションステートに蓄積（最新60件）。"""
+
+    snapshot = {
+        "timestamp": dt.datetime.now().isoformat(timespec="seconds"),
+        "売上高": float(amounts.get("REV", 0.0)),
+        "粗利": float(amounts.get("GROSS", 0.0)),
+        "営業利益": float(amounts.get("OP", 0.0)),
+        "経常利益": float(amounts.get("ORD", 0.0)),
+        "売上原価": float(amounts.get("COGS_TTL", 0.0)),
+        "販管費": float(amounts.get("OPEX_TTL", 0.0)),
+    }
+    keys = ["売上高", "粗利", "営業利益", "経常利益", "売上原価", "販管費"]
+    timeline: List[Dict[str, float]] = st.session_state.get("metrics_timeline", [])
+    should_append = True
+    if timeline:
+        last = timeline[-1]
+        should_append = any(
+            not math.isclose(float(last.get(k, 0.0)), snapshot[k], rel_tol=1e-9, abs_tol=1.0)
+            for k in keys
+        )
+    if should_append:
+        timeline.append(snapshot)
+    st.session_state["metrics_timeline"] = timeline[-60:]
+
+
+def get_metrics_timeline_df() -> pd.DataFrame:
+    timeline = st.session_state.get("metrics_timeline", [])
+    if not timeline:
+        return pd.DataFrame()
+    df = pd.DataFrame(timeline)
+    if "timestamp" in df.columns:
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+    df = df.dropna(subset=["timestamp"])
+    if not df.empty:
+        df = df.sort_values("timestamp")
+    return df
 
 
 def render_sidebar_navigation() -> str:
@@ -1995,15 +2069,45 @@ with st.container():
         with st.container(border=True):
             st.markdown("### KPIスナップショット")
             st.caption("設定中のベースプランを即時に俯瞰できるサマリーです。")
-            top_cols = st.columns(4)
-            with top_cols[0]:
-                st.metric("売上高", format_amount_with_unit(base_amt["REV"], base_plan.unit))
-            with top_cols[1]:
-                st.metric("粗利(加工高)", format_amount_with_unit(base_amt["GROSS"], base_plan.unit))
-            with top_cols[2]:
-                st.metric("営業利益", format_amount_with_unit(base_amt["OP"], base_plan.unit))
-            with top_cols[3]:
-                st.metric("経常利益", format_amount_with_unit(base_amt["ORD"], base_plan.unit))
+            fcf_value = base_amt.get("ORD", 0.0) + base_amt.get("OPEX_DEP", 0.0)
+            kpi_definitions = [
+                (
+                    "売上高",
+                    float(base_amt.get("REV", 0.0)),
+                    "amount",
+                    "kpi_sales",
+                    lambda v: format_amount_with_unit(v, base_plan.unit),
+                ),
+                (
+                    "粗利率",
+                    float(metrics_view.get("gross_margin") or 0.0),
+                    "ratio",
+                    "kpi_gross_margin",
+                    format_ratio,
+                ),
+                (
+                    "営業利益",
+                    float(base_amt.get("OP", 0.0)),
+                    "amount",
+                    "kpi_op",
+                    lambda v: format_amount_with_unit(v, base_plan.unit),
+                ),
+                (
+                    "FCF",
+                    float(fcf_value),
+                    "amount",
+                    "kpi_fcf",
+                    lambda v: format_amount_with_unit(v, base_plan.unit),
+                ),
+            ]
+            card_cols = st.columns(4, gap="large")
+            for idx, (label, value, kind, key, formatter) in enumerate(kpi_definitions):
+                col = card_cols[idx]
+                display_value = formatter(value)
+                delta_text = get_metric_delta(key, value, unit=base_plan.unit, kind=kind)
+                col.metric(label, display_value, delta=delta_text)
+
+            update_metric_timeline(base_amt)
 
             be_value = base_amt["BE_SALES"]
             be_label = "∞" if not math.isfinite(be_value) else format_amount_with_unit(be_value, base_plan.unit)
@@ -2083,90 +2187,125 @@ with st.container():
                 for card in cost_cards
                 if card["code"] in {"COGS_MAT", "COGS_LBR", "COGS_OUT_SRC", "COGS_OUT_CON", "COGS_OTH"}
             ]
-            if revenue > 0 and any(card["value"] > 0 for card in cost_chart_cards):
-                names = [card["label"] for card in cost_chart_cards]
-                shares = [
-                    max(0.0, card["ratio"]) * 100 if math.isfinite(card["ratio"]) else 0.0
-                    for card in cost_chart_cards
-                ]
-                max_share = max(shares) if shares else 0.0
-                slider_min = 5.0
-                slider_max = max(
-                    slider_min + 5.0,
-                    (math.ceil(max_share * 1.6 / 5.0) * 5.0) if max_share > 0 else 30.0,
-                )
-                default_limit = max(
-                    slider_min + 5.0,
-                    (math.ceil(max_share * 1.2 / 5.0) * 5.0) if max_share > 0 else 25.0,
-                )
-                share_axis_max = st.slider(
-                    "表示上限（%）",
-                    min_value=float(slider_min),
-                    max_value=float(slider_max),
-                    value=float(min(default_limit, slider_max)),
-                    step=1.0,
-                    key="cost_share_axis",
-                    help="棒グラフ右端のスケールをコントロールできます。",
-                )
-
-                colors = [
-                    THEME_COLORS["primary_light"] if i % 2 == 0 else THEME_COLORS["primary"]
-                    for i in range(len(names))
-                ]
-                hover_details = [
-                    f"{format_ratio(card['ratio'])} ／ {format_amount_with_unit(card['value'], base_plan.unit)}"
-                    for card in cost_chart_cards
-                ]
-                fig_height = 120 + 70 * len(cost_chart_cards)
-                fig = go.Figure(
-                    data=[
-                        go.Bar(
-                            x=shares,
-                            y=names,
-                            orientation="h",
-                            marker=dict(
-                                color=colors,
-                                line=dict(color="rgba(31, 78, 121, 0.18)", width=1.4),
-                            ),
-                            text=[format_ratio(card["ratio"]) for card in cost_chart_cards],
-                            textposition="outside",
-                            textfont=dict(size=12, color=THEME_COLORS["text"]),
-                            customdata=hover_details,
-                            hovertemplate="<b>%{y}</b><br>売上比率: %{x:.1f}%<br>%{customdata}<extra></extra>",
-                            cliponaxis=False,
+            timeline_df = get_metrics_timeline_df()
+            chart_cols = st.columns(2, gap="large")
+            with chart_cols[0]:
+                st.markdown("#### 主指標トレンド（ライン）")
+                if not timeline_df.empty:
+                    line_source = timeline_df.melt(
+                        id_vars="timestamp",
+                        value_vars=["売上高", "粗利", "営業利益", "経常利益"],
+                        var_name="指標",
+                        value_name="金額",
+                    )
+                    line_chart = (
+                        alt.Chart(line_source)
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("timestamp:T", title="更新時刻"),
+                            y=alt.Y("金額:Q", title="金額 (円)", axis=alt.Axis(format="~s")),
+                            color=alt.Color("指標:N", title="主指標"),
+                            tooltip=[
+                                alt.Tooltip("timestamp:T", title="更新時刻"),
+                                alt.Tooltip("指標:N"),
+                                alt.Tooltip("金額:Q", title="金額", format=","),
+                            ],
                         )
-                    ]
+                        .properties(height=260)
+                        .interactive()
+                    )
+                    st.altair_chart(line_chart, use_container_width=True)
+                else:
+                    st.caption("指標履歴がまだありません。値を変更すると推移が記録されます。")
+
+            with chart_cols[1]:
+                st.markdown("#### コスト構成（バー）")
+                if revenue > 0 and any(card["value"] > 0 for card in cost_chart_cards):
+                    cost_df = pd.DataFrame(cost_chart_cards)
+                    cost_df["売上比率"] = cost_df["ratio"].apply(
+                        lambda v: max(0.0, float(v)) * 100 if math.isfinite(v) else 0.0
+                    )
+                    max_share = cost_df["売上比率"].max() if not cost_df.empty else 0.0
+                    slider_min = 5.0
+                    slider_max = max(
+                        slider_min + 5.0,
+                        (math.ceil(max_share * 1.6 / 5.0) * 5.0) if max_share > 0 else 30.0,
+                    )
+                    default_limit = max(
+                        slider_min + 5.0,
+                        (math.ceil(max_share * 1.2 / 5.0) * 5.0) if max_share > 0 else 25.0,
+                    )
+                    share_axis_max = st.slider(
+                        "表示上限（%）",
+                        min_value=float(slider_min),
+                        max_value=float(slider_max),
+                        value=float(min(default_limit, slider_max)),
+                        step=1.0,
+                        key="cost_share_axis",
+                        help="棒グラフ右端のスケールをコントロールできます。",
+                    )
+                    cost_df["金額表示"] = cost_df["value"].apply(
+                        lambda v: format_amount_with_unit(v, base_plan.unit)
+                    )
+                    bar_height = max(220, 60 * len(cost_df))
+                    bar_chart = (
+                        alt.Chart(cost_df)
+                        .mark_bar()
+                        .encode(
+                            x=alt.X(
+                                "売上比率:Q",
+                                title="売上比率（%）",
+                                scale=alt.Scale(domain=(0, share_axis_max)),
+                            ),
+                            y=alt.Y("label:N", sort="-x", title=None),
+                            color=alt.Color("label:N", title="原価カテゴリ"),
+                            tooltip=[
+                                alt.Tooltip("label:N", title="コスト項目"),
+                                alt.Tooltip("売上比率:Q", title="売上比率", format=".1f"),
+                                alt.Tooltip("金額表示:N", title="金額"),
+                            ],
+                        )
+                        .properties(height=bar_height)
+                        .interactive()
+                    )
+                    st.altair_chart(bar_chart, use_container_width=True)
+                else:
+                    st.caption("原価データが未設定のため、バーグラフは表示されません。")
+
+            if not timeline_df.empty:
+                area_source = timeline_df[["timestamp", "売上原価", "販管費", "営業利益"]].copy()
+                if len(area_source) == 1:
+                    dup = area_source.copy()
+                    dup["timestamp"] = dup["timestamp"] + pd.Timedelta(seconds=1)
+                    area_source = pd.concat([area_source, dup], ignore_index=True)
+                area_long = area_source.melt(
+                    id_vars="timestamp",
+                    var_name="カテゴリ",
+                    value_name="金額",
                 )
-                fig.update_layout(
-                    height=fig_height,
-                    margin=dict(l=0, r=18, t=48, b=10),
-                    bargap=0.25,
-                    plot_bgcolor="#FFFFFF",
-                    paper_bgcolor="#FFFFFF",
-                    xaxis=dict(
-                        title="売上比率（%）",
-                        range=[0, share_axis_max],
-                        showgrid=True,
-                        gridcolor="#D4DEE9",
-                        ticksuffix="%",
-                        zeroline=False,
-                        rangeslider=dict(visible=True, thickness=0.12, bgcolor="rgba(31, 78, 121, 0.08)"),
-                    ),
-                    yaxis=dict(autorange="reversed", showgrid=False),
-                    hoverlabel=dict(bgcolor=THEME_COLORS["primary"], font=dict(color="#FFFFFF")),
+                area_chart = (
+                    alt.Chart(area_long)
+                    .mark_area(opacity=0.6)
+                    .encode(
+                        x=alt.X("timestamp:T", title="更新時刻"),
+                        y=alt.Y("金額:Q", stack="zero", title="金額 (円)", axis=alt.Axis(format="~s")),
+                        color=alt.Color("カテゴリ:N", title="因数分解"),
+                        tooltip=[
+                            alt.Tooltip("timestamp:T", title="更新時刻"),
+                            alt.Tooltip("カテゴリ:N"),
+                            alt.Tooltip("金額:Q", title="金額", format=","),
+                        ],
+                    )
+                    .properties(height=260)
+                    .interactive()
                 )
-                st.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    config={
-                        "displaylogo": False,
-                        "modeBarButtonsToAdd": ["drawline", "drawrect", "eraseshape"],
-                        "toImageButtonOptions": {"filename": "standard-cost-breakdown"},
-                    },
-                )
+                st.markdown("#### コストと利益の積み上げ（エリア）")
+                st.altair_chart(area_chart, use_container_width=True)
                 st.caption(
-                    "横棒グラフは売上100に対し、それぞれの標準原価がどれだけを占めるかを示します。ズーム/パンに加え、スライダーで目盛りをコントロールできます。"
+                    "ライン・バー・エリアの各チャートはドラッグでズーム／パンが可能です。Tooltipで単位付きの値を確認できます。"
                 )
+            else:
+                st.caption("チャートを表示するには、指標値を入力・更新してください。")
 
             cost_table = [
                 {
@@ -2207,12 +2346,72 @@ with st.container():
                     }
                 )
             df_main = pd.DataFrame(rows)
-            st.dataframe(
-                df_main,
-                use_container_width=True,
-                hide_index=True,
-                height=min(520, 40 + 28 * len(rows)),
-            )
+            table_col, viz_col = st.columns([2.6, 1.4], gap="large")
+            with table_col:
+                st.dataframe(
+                    df_main,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(520, 40 + 28 * len(rows)),
+                )
+            with viz_col:
+                st.markdown("#### 主指標ミニライン")
+                timeline_df_detail = get_metrics_timeline_df()
+                if not timeline_df_detail.empty:
+                    recent_df = timeline_df_detail.tail(10)
+                    line_source = recent_df.melt(
+                        id_vars="timestamp",
+                        value_vars=["売上高", "粗利", "営業利益", "経常利益"],
+                        var_name="指標",
+                        value_name="金額",
+                    )
+                    mini_line = (
+                        alt.Chart(line_source)
+                        .mark_line(point=True)
+                        .encode(
+                            x=alt.X("timestamp:T", title="更新時刻"),
+                            y=alt.Y("金額:Q", title="金額 (円)", axis=alt.Axis(format="~s")),
+                            color=alt.Color("指標:N", title="主指標"),
+                            tooltip=[
+                                alt.Tooltip("timestamp:T", title="更新時刻"),
+                                alt.Tooltip("指標:N"),
+                                alt.Tooltip("金額:Q", title="金額", format=","),
+                            ],
+                        )
+                        .properties(height=180)
+                        .interactive()
+                    )
+                    st.altair_chart(mini_line, use_container_width=True)
+                else:
+                    st.caption("履歴が登録されるとミニチャートに推移が表示されます。")
+
+                st.markdown("#### 因数分解バー")
+                factor_df = pd.DataFrame(
+                    [
+                        {"カテゴリ": "売上原価", "金額": float(base_amt_detail.get("COGS_TTL", 0.0))},
+                        {"カテゴリ": "販管費", "金額": float(base_amt_detail.get("OPEX_TTL", 0.0))},
+                        {"カテゴリ": "営業利益", "金額": float(base_amt_detail.get("OP", 0.0))},
+                    ]
+                )
+                factor_df["金額表示"] = factor_df["金額"].apply(
+                    lambda v: format_amount_with_unit(v, base_plan.unit)
+                )
+                factor_chart = (
+                    alt.Chart(factor_df)
+                    .mark_bar()
+                    .encode(
+                        x=alt.X("金額:Q", title="金額 (円)", axis=alt.Axis(format="~s")),
+                        y=alt.Y("カテゴリ:N", sort="-x", title=None),
+                        color=alt.Color("カテゴリ:N", title="因数"),
+                        tooltip=[
+                            alt.Tooltip("カテゴリ:N"),
+                            alt.Tooltip("金額表示:N", title="金額"),
+                        ],
+                    )
+                    .properties(height=180)
+                    .interactive()
+                )
+                st.altair_chart(factor_chart, use_container_width=True)
 
         with st.expander("🔧 金額上書き（固定費/個別額の設定）", expanded=False):
             st.caption("金額が入力された項目は、率の指定より優先され固定費扱いになります。")
