@@ -137,7 +137,6 @@ def _line_amount(
     gross_guess: Decimal,
     sales: Decimal,
     amount_overrides: Dict[str, Decimal] | None,
-    period_factor: Decimal,
 ) -> Decimal:
     if amount_overrides and code in amount_overrides:
         return Decimal(amount_overrides[code])
@@ -148,32 +147,29 @@ def _line_amount(
     value = Decimal(cfg.get("value", Decimal("0")))
     base = str(cfg.get("rate_base", "sales"))
     if method == "amount":
-        return value * period_factor
+        return value
     if base == "sales":
         return sales * value
     if base == "gross":
         return max(Decimal("0"), gross_guess) * value
     if base == "fixed":
-        return value * period_factor
+        return value
     return sales * value
 
 
-def _compute_impl(
+def compute(
     plan: PlanConfig,
-    sales: Decimal,
-    amount_overrides: Dict[str, Decimal] | None,
-    period_factor: Decimal,
+    sales_override: Decimal | None = None,
+    amount_overrides: Dict[str, Decimal] | None = None,
 ) -> Dict[str, Decimal]:
+    sales = Decimal(plan.base_sales if sales_override is None else sales_override)
     amounts: Dict[str, Decimal] = {code: Decimal("0") for code, *_ in ITEMS}
     amounts["REV"] = sales
 
     gross_guess = sales
     for _ in range(5):
         cogs = sum(
-            max(
-                Decimal("0"),
-                _line_amount(plan, code, gross_guess, sales, amount_overrides, period_factor),
-            )
+            max(Decimal("0"), _line_amount(plan, code, gross_guess, sales, amount_overrides))
             for code in COST_CODES
         )
         new_gross = sales - cogs
@@ -184,10 +180,7 @@ def _compute_impl(
 
     cogs_total = Decimal("0")
     for code in COST_CODES:
-        val = max(
-            Decimal("0"),
-            _line_amount(plan, code, gross_guess, sales, amount_overrides, period_factor),
-        )
+        val = max(Decimal("0"), _line_amount(plan, code, gross_guess, sales, amount_overrides))
         amounts[code] = val
         cogs_total += val
     amounts["COGS_TTL"] = cogs_total
@@ -195,24 +188,14 @@ def _compute_impl(
 
     opex_total = Decimal("0")
     for code in OPEX_CODES:
-        val = max(
-            Decimal("0"),
-            _line_amount(
-                plan, code, amounts["GROSS"], sales, amount_overrides, period_factor
-            ),
-        )
+        val = max(Decimal("0"), _line_amount(plan, code, amounts["GROSS"], sales, amount_overrides))
         amounts[code] = val
         opex_total += val
     amounts["OPEX_TTL"] = opex_total
     amounts["OP"] = amounts["GROSS"] - amounts["OPEX_TTL"]
 
     for code in NOI_CODES + NOE_CODES:
-        val = max(
-            Decimal("0"),
-            _line_amount(
-                plan, code, amounts["GROSS"], sales, amount_overrides, period_factor
-            ),
-        )
+        val = max(Decimal("0"), _line_amount(plan, code, amounts["GROSS"], sales, amount_overrides))
         amounts[code] = val
 
     amounts["ORD"] = amounts["OP"] + (
@@ -235,9 +218,9 @@ def _compute_impl(
     for code in COST_CODES + OPEX_CODES + NOI_CODES + NOE_CODES:
         cfg = plan.items.get(code)
         if cfg and cfg.get("method") == "amount":
-            fixed_cost += Decimal(cfg.get("value", Decimal("0"))) * period_factor
+            fixed_cost += Decimal(cfg.get("value", Decimal("0")))
         elif cfg and str(cfg.get("rate_base")) == "fixed":
-            fixed_cost += Decimal(cfg.get("value", Decimal("0"))) * period_factor
+            fixed_cost += Decimal(cfg.get("value", Decimal("0")))
 
     contribution_ratio = Decimal("1") - (variable_cost / sales if sales > 0 else Decimal("0"))
     if contribution_ratio <= 0:
@@ -254,31 +237,6 @@ def _compute_impl(
     )
 
     return amounts
-
-
-def compute(
-    plan: PlanConfig,
-    sales_override: Decimal | None = None,
-    amount_overrides: Dict[str, Decimal] | None = None,
-) -> Dict[str, Decimal]:
-    sales = Decimal(plan.base_sales if sales_override is None else sales_override)
-    return _compute_impl(plan, sales, amount_overrides, Decimal("1"))
-
-
-def compute_period_amounts(
-    plan: PlanConfig,
-    sales: Decimal,
-    *,
-    period_fraction: Decimal,
-    amount_overrides: Dict[str, Decimal] | None = None,
-) -> Dict[str, Decimal]:
-    """Compute contribution results for a sub-annual period."""
-
-    sales_value = Decimal(sales)
-    fraction = Decimal(period_fraction)
-    if fraction <= 0:
-        raise ValueError("period_fraction must be positive")
-    return _compute_impl(plan, sales_value, amount_overrides, fraction)
 
 
 def compute_plan(plan: Dict[str, Decimal]) -> Dict[str, Decimal]:
