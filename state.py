@@ -83,6 +83,36 @@ STATE_SPECS: Dict[str, StateSpec] = {
     ),
     "state_backups": StateSpec(list, list, "セッションスナップショット"),
     "industry_template_state": StateSpec(dict, dict, "業種テンプレート設定"),
+    "strategy_bsc": StateSpec(
+        lambda: {
+            "financial": [],
+            "customer": [],
+            "process": [],
+            "learning": [],
+        },
+        dict,
+        "BSC設定",
+    ),
+    "strategy_pest": StateSpec(
+        lambda: {
+            "political": [],
+            "economic": [],
+            "social": [],
+            "technological": [],
+        },
+        dict,
+        "PEST分析入力",
+    ),
+    "strategy_swot": StateSpec(
+        lambda: {
+            "strengths": [],
+            "weaknesses": [],
+            "opportunities": [],
+            "threats": [],
+        },
+        dict,
+        "SWOT分析入力",
+    ),
 }
 
 

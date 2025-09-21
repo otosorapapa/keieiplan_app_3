@@ -30,6 +30,11 @@ def _build_navigation(language: str) -> list[st.Page]:
             icon=":pencil2:",
         ),
         st.Page(
+            "pages/7_戦略フレームワーク設定.py",
+            title=t("navigation.strategy"),
+            icon=":dart:",
+        ),
+        st.Page(
             "pages/3_シナリオ&感度分析.py",
             title=t("navigation.scenario"),
             icon=":game_die:",

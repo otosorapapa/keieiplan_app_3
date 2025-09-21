@@ -8,6 +8,7 @@
     "localization": "言語とローカライズ",
     "dashboard": "ダッシュボード",
     "data_entry": "データ入力",
+    "strategy": "戦略設定",
     "scenario": "シナリオ & 感度分析",
     "segment": "店舗 / 部門 / チャネル分析",
     "funding": "補助金 / 金融機関資料",
@@ -118,6 +119,10 @@
       "caption": "経営指標の俯瞰ビューを提供します。",
       "todo_header": "TODO",
       "todo_description": "主要なチャートやKPIカードを追加してください。"
+    },
+    "strategy": {
+      "title": "戦略フレームワーク設定",
+      "caption": "BSC・PEST・SWOTを入力し、戦略指標をダッシュボードとレポートに連携します。"
     },
     "data_entry": {
       "title": "データ入力",

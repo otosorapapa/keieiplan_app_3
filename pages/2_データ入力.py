@@ -7,7 +7,7 @@ from typing import Any, Dict
 import pandas as pd
 import streamlit as st
 
-from core import io
+from core import io, strategy
 from core.templates import list_industry_templates
 from formatting import format_amount_with_unit
 from localization import render_language_status_alert, translate, translate_list
@@ -207,6 +207,11 @@ def _render_export_import_panel() -> None:
     bundle, _ = load_finance_bundle()
     settings_state: Dict[str, Any] = st.session_state.get("finance_settings", {})
     metadata = st.session_state.get("industry_template_state", {})
+    strategy_payload = {
+        "bsc": st.session_state.get("strategy_bsc", {}),
+        "pest": st.session_state.get("strategy_pest", {}),
+        "swot": st.session_state.get("strategy_swot", {}),
+    }
     payload = io.prepare_finance_export_payload(
         sales=bundle.sales,
         costs=bundle.costs,
@@ -216,6 +221,7 @@ def _render_export_import_panel() -> None:
         working_capital=bundle.working_capital,
         settings=settings_state,
         metadata=metadata,
+        strategy=strategy_payload,
     )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -287,6 +293,17 @@ def _render_export_import_panel() -> None:
                 st.session_state["finance_settings"] = settings_state
             if pending_payload.get("metadata"):
                 st.session_state["industry_template_state"] = pending_payload["metadata"]
+            if pending_payload.get("strategy"):
+                strategy_data = pending_payload["strategy"]
+                st.session_state["strategy_bsc"] = strategy.normalize_bsc_state(
+                    strategy_data.get("bsc")
+                )
+                st.session_state["strategy_pest"] = strategy.normalize_pest_state(
+                    strategy_data.get("pest")
+                )
+                st.session_state["strategy_swot"] = strategy.normalize_swot_state(
+                    strategy_data.get("swot")
+                )
             st.session_state[IMPORT_MESSAGE_KEY] = {
                 "filename": filename,
                 "warnings": warnings,

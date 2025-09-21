@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from . import charts, exporters, finance, io, validators
+from . import charts, exporters, finance, io, strategy, validators
 
 __all__ = [
     "charts",
     "exporters",
     "finance",
     "io",
+    "strategy",
     "validators",
 ]
