@@ -4,8 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Tuple
 
-from pydantic import ValidationError
-
 from models import (
     CapexPlan,
     CostPlan,
@@ -13,6 +11,7 @@ from models import (
     LoanSchedule,
     SalesPlan,
     TaxPolicy,
+    ValidationError,
     WorkingCapitalAssumptions,
 )
 
@@ -37,7 +36,7 @@ def _issues_from_error(prefix: str, error: ValidationError) -> List[ValidationIs
 
 def validate_sales(data: Dict[str, Any]) -> Tuple[SalesPlan | None, List[ValidationIssue]]:
     try:
-        plan = SalesPlan(**data)
+        plan = SalesPlan.from_dict(data)
         return plan, []
     except ValidationError as exc:
         return None, _issues_from_error("sales", exc)
@@ -45,7 +44,7 @@ def validate_sales(data: Dict[str, Any]) -> Tuple[SalesPlan | None, List[Validat
 
 def validate_costs(data: Dict[str, Any]) -> Tuple[CostPlan | None, List[ValidationIssue]]:
     try:
-        plan = CostPlan(**data)
+        plan = CostPlan.from_dict(data)
         return plan, []
     except ValidationError as exc:
         return None, _issues_from_error("costs", exc)
@@ -53,7 +52,7 @@ def validate_costs(data: Dict[str, Any]) -> Tuple[CostPlan | None, List[Validati
 
 def validate_capex(data: Dict[str, Any]) -> Tuple[CapexPlan | None, List[ValidationIssue]]:
     try:
-        plan = CapexPlan(**data)
+        plan = CapexPlan.from_dict(data)
         return plan, []
     except ValidationError as exc:
         return None, _issues_from_error("capex", exc)
@@ -61,7 +60,7 @@ def validate_capex(data: Dict[str, Any]) -> Tuple[CapexPlan | None, List[Validat
 
 def validate_loans(data: Dict[str, Any]) -> Tuple[LoanSchedule | None, List[ValidationIssue]]:
     try:
-        schedule = LoanSchedule(**data)
+        schedule = LoanSchedule.from_dict(data)
         return schedule, []
     except ValidationError as exc:
         return None, _issues_from_error("loans", exc)
@@ -69,7 +68,7 @@ def validate_loans(data: Dict[str, Any]) -> Tuple[LoanSchedule | None, List[Vali
 
 def validate_tax(data: Dict[str, Any]) -> Tuple[TaxPolicy | None, List[ValidationIssue]]:
     try:
-        policy = TaxPolicy(**data)
+        policy = TaxPolicy.from_dict(data)
         return policy, []
     except ValidationError as exc:
         return None, _issues_from_error("tax", exc)
@@ -79,7 +78,7 @@ def validate_working_capital(
     data: Dict[str, Any]
 ) -> Tuple[WorkingCapitalAssumptions | None, List[ValidationIssue]]:
     try:
-        wc = WorkingCapitalAssumptions(**data)
+        wc = WorkingCapitalAssumptions.from_dict(data)
         return wc, []
     except ValidationError as exc:
         return None, _issues_from_error("working_capital", exc)
