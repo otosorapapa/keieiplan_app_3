@@ -9,6 +9,7 @@ import pandas as pd
 import streamlit as st
 from docx import Document
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 from calc import compute, plan_from_models, summarize_plan_metrics
 from formatting import UNIT_FACTORS, format_amount_with_unit, format_ratio, to_decimal
@@ -129,10 +130,16 @@ with pdf_tab:
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", size=14)
-    pdf.cell(0, 10, txt="Keiei Keikaku Studio | Summary Report", ln=True)
+    pdf.cell(
+        0,
+        10,
+        text="Keiei Keikaku Studio | Summary Report",
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
     pdf.set_font("Helvetica", size=11)
     for line in pdf_summary_lines:
-        pdf.multi_cell(0, 8, line)
+        pdf.multi_cell(0, 8, line, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.output(pdf_buffer)
     st.download_button(
         "📄 PDFダウンロード",
