@@ -158,12 +158,16 @@ def _percent_number_input(
     step: float = 0.01,
     key: str | None = None,
 ) -> float:
+    # ``st.number_input`` in Streamlit 1.49+ rejects printf-style format strings
+    # that append extra characters such as ``%``.  We therefore display the
+    # ratio as a plain decimal (e.g. ``0.2500``) while keeping the underlying
+    # value in the familiar 0〜1 range.
     kwargs = {
         "min_value": float(min_value),
         "max_value": float(max_value),
         "step": float(step),
         "value": float(value),
-        "format": "%.2f%%",
+        "format": "%.4f",
     }
     if key is not None:
         kwargs["key"] = key
@@ -441,13 +445,15 @@ with cost_tab:
     for col, code, label in zip(var_cols, var_codes, var_labels):
         with col:
             variable_inputs[code] = _percent_number_input(
-                f"{label} 原価率",
+                f"{label} 原価率 (小数)",
                 min_value=0.0,
                 max_value=1.0,
                 step=0.005,
                 value=float(variable_ratios.get(code, 0.0)),
             )
-    st.caption("変動費は売上高に対する比率で入力します。0〜1の範囲で設定してください。")
+    st.caption(
+        "変動費は売上高に対する比率（例：0.25=25%）を小数で入力します。0〜1の範囲で設定してください。"
+    )
 
     fixed_cols = st.columns(3)
     fixed_codes = ["OPEX_H", "OPEX_K", "OPEX_DEP"]
@@ -521,7 +527,12 @@ with invest_tab:
                 "元本 (円)", min_value=0.0, step=1_000_000.0, format="¥%d"
             ),
             "金利": st.column_config.NumberColumn(
-                "金利", min_value=0.0, max_value=0.2, step=0.001, format="%.2f%%"
+                "金利 (小数)",
+                min_value=0.0,
+                max_value=0.2,
+                step=0.001,
+                format="%.4f",
+                help="0.0000=0%、0.1000=10% のように小数で入力します。",
             ),
             "返済期間(月)": st.column_config.NumberColumn("返済期間 (月)", min_value=1, max_value=600, step=1),
             "開始月": st.column_config.NumberColumn("開始月", min_value=1, max_value=12, step=1),
@@ -600,28 +611,28 @@ with tax_tab:
     st.subheader("税制・備考")
     tax_defaults = finance_raw.get("tax", {})
     corporate_rate = _percent_number_input(
-        "法人税率 (0-55%)",
+        "法人税率 (小数 0〜0.55)",
         min_value=0.0,
         max_value=0.55,
         step=0.01,
         value=float(tax_defaults.get("corporate_tax_rate", 0.3)),
     )
     consumption_rate = _percent_number_input(
-        "消費税率 (0-20%)",
+        "消費税率 (小数 0〜0.20)",
         min_value=0.0,
         max_value=0.20,
         step=0.01,
         value=float(tax_defaults.get("consumption_tax_rate", 0.1)),
     )
     dividend_ratio = _percent_number_input(
-        "配当性向",
+        "配当性向 (小数)",
         min_value=0.0,
         max_value=1.0,
         step=0.05,
         value=float(tax_defaults.get("dividend_payout_ratio", 0.0)),
     )
 
-    st.caption("税率は自動でバリデーションされます。")
+    st.caption("税率は小数で入力します（例：0.30=30%）。入力内容は自動でバリデーションされます。")
 
     if any(err.field.startswith("tax") for err in validation_errors):
         messages = "<br/>".join(err.message for err in validation_errors if err.field.startswith("tax"))
