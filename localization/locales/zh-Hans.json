@@ -1,0 +1,220 @@
+{
+  "app": {
+    "page_title": "经营计划仪表板",
+    "page_icon": "📊",
+    "footer": "© 经营计划制定应用（Streamlit 版）| 展示单位与计算单位分离，尽量减少四舍五入误差。"
+  },
+  "navigation": {
+    "localization": "语言与本地化",
+    "dashboard": "仪表板",
+    "data_entry": "数据录入",
+    "scenario": "情景与敏感度分析",
+    "segment": "门店 / 部门 / 渠道分析",
+    "funding": "补贴与金融资料",
+    "export": "导出 (PPTX / Excel)"
+  },
+  "languages": {
+    "status_labels": {
+      "stable": "稳定版",
+      "beta": "测试版",
+      "preview": "预览版"
+    },
+    "status_messages": {
+      "beta": "英语界面仍处于测试阶段，部分页面可能暂时显示日文标签。",
+      "preview": "该语言包为预览版本，请在对外共享前确认术语与计算规则。"
+    },
+    "ja": {
+      "label": "日本語",
+      "description": [
+        "针对日本本土中小企业的常用术语与报表格式。",
+        "会计与税务逻辑以日本法规为基础。"
+      ]
+    },
+    "en": {
+      "label": "English (US)",
+      "description": [
+        "符合美国中小企业使用的财务术语。",
+        "默认配置包含联邦企业税与代表性州税假设。"
+      ]
+    },
+    "zh-Hans": {
+      "label": "简体中文",
+      "description": [
+        "面向中国大陆企业的翻译正在逐步扩充。",
+        "税制与社保参数基于国家税务总局公布的试行数值。"
+      ]
+    },
+    "ko": {
+      "label": "한국어",
+      "description": [
+        "韩语翻译聚焦中型企业常用术语。",
+        "税收和社会保险假设参考韩国雇佣劳动部资料。"
+      ]
+    }
+  },
+  "guides": {
+    "button_label": "使用指南",
+    "language": {
+      "overview": [
+        "切换语言后界面文本会立即更新。",
+        "英语版仍在测试中，翻译将持续改进。"
+      ],
+      "video_url": "https://www.youtube.com/watch?v=ysz5S6PUM-U",
+      "faq": [
+        "**问：切换语言需要重启吗？** → 不需要，保存后立即生效。",
+        "**问：如何反馈翻译建议？** → 请使用设置页面底部的反馈链接。"
+      ]
+    },
+    "tax": {
+      "overview": [
+        "各国税制模型包含企业所得税、间接税及企业社保负担。",
+        "系统会根据所选语言推荐模型，也可手动覆盖。"
+      ],
+      "video_url": "https://www.youtube.com/watch?v=2LhoCfjm8R4",
+      "faq": [
+        "**问：美国州税如何处理？** → 美国模型在联邦税基础上增加代表性的5%州税。",
+        "**问：默认折旧方式是什么？** → 依据各国中小企业常用的税务折旧方式设置。"
+      ]
+    },
+    "finance_settings": {
+      "overview": [
+        "单位、货币与FTE设置在所有页面共享。",
+        "修改后请点击保存以同步至各页面。"
+      ],
+      "video_url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+      "faq": [
+        "**问：FTE可以自动计算吗？** → 可在计算器中输入人数与工时后应用结果。",
+        "**问：如何变更会计年度起始月？** → 从下拉框选择月份，计算将随之调整。"
+      ]
+    }
+  },
+  "pages": {
+    "localization": {
+      "title": "语言与本地化",
+      "caption": "管理界面语言及税制 / 法规预设。",
+      "language_section_title": "选择界面语言",
+      "language_section_caption": "根据语言包切换界面术语与标签。",
+      "tax_section_title": "会计与法规模型",
+      "tax_section_caption": "按国家切换企业税、间接税与社保假设。",
+      "status_overview_title": "提供状态",
+      "status_overview_caption": "查看各语言的稳定程度与注意事项。",
+      "recommended_tax_profile": "推荐模型：{profile}",
+      "submit_label": "保存设置",
+      "success_message": "语言与本地化设置已更新。",
+      "language_table_header": "可用界面语言",
+      "tax_profile_details": "税制模型概览",
+      "sync_hint": "切换语言后请再次确认税制模型是否合适。",
+      "beta_panel_title": "状态详情",
+      "feedback_prompt": "欢迎向支持团队反馈翻译或制度逻辑的改进建议。",
+      "tax_detail_headers": {
+        "corporate_tax": "企业所得税率",
+        "consumption_tax": "间接税 / 增值税",
+        "social_insurance": "企业社保负担",
+        "depreciation": "默认折旧方式"
+      }
+    },
+    "dashboard": {
+      "title": "仪表板",
+      "caption": "总览核心经营指标。",
+      "todo_header": "待办",
+      "todo_description": "请添加主要KPI的图表与卡片。"
+    },
+    "data_entry": {
+      "title": "数据录入",
+      "caption": "上传财务报表或手动录入假设。",
+      "file_uploader_label": "财务数据文件",
+      "file_loaded": "文件已成功导入。",
+      "manual_form_label": "手工录入表单",
+      "manual_form_placeholder": "此处将添加收入、成本与投资的详细输入组件。",
+      "validation_warning": "需要检查输入内容。",
+      "validation_success": "校验通过。",
+      "guide": [
+        "上传Excel或CSV即可自动校验数据。",
+        "手工表单将于后续版本逐步完善。"
+      ],
+      "guide_video": "https://www.youtube.com/watch?v=oHg5SJYRHA0",
+      "guide_faq": [
+        "**问：CSV支持哪种编码？** → 推荐使用UTF-8。",
+        "**问：有示例数据吗？** → 可在首页标签中应用示例数据。"
+      ]
+    },
+    "scenario": {
+      "title": "情景与敏感度分析",
+      "caption": "对比不同情景及敏感度分析结果。",
+      "scenario_table": "情景列表",
+      "todo": "请添加调节收入与成本假设的交互组件。"
+    },
+    "segment": {
+      "title": "门店 / 部门 / 渠道分析",
+      "caption": "按细分维度可视化业绩与KPI。",
+      "todo": "请提供编辑各细分指标的界面组件。"
+    },
+    "funding": {
+      "title": "补贴与金融资料",
+      "caption": "准备补贴申请及金融机构所需资料。",
+      "summary_header": "资金计划摘要",
+      "template_header": "申请模板",
+      "template_placeholder": "此处将添加补贴和贷款所需的文档结构。",
+      "checklist_title": "提交前检查清单"
+    },
+    "export": {
+      "title": "导出 (PPTX / Excel)",
+      "caption": "导出经营计划成果。",
+      "ready_state": "可导出状态",
+      "download_excel": "下载 Excel",
+      "download_pptx": "下载 PPTX",
+      "todo": "导出逻辑请在 core/exporters.py 中实现。"
+    }
+  },
+  "tax_profiles": {
+    "jp_sme": {
+      "label": "日本（中小企业标准）",
+      "description": [
+        "企业所得税率取加权平均的23.2%，考虑中小企业优惠。",
+        "消费税率按10%简易课税制度设定。",
+        "企业社保负担估算为15%，包含养老金与健康保险。",
+        "默认折旧：建筑及设备采用直线法，机器采用递减余额法。"
+      ],
+      "depreciation": "直线法（建筑/设备） / 递减余额法（机器）"
+    },
+    "us_standard": {
+      "label": "美国（含州税的中小企业）",
+      "description": [
+        "企业税率假设为21%联邦税外加5%代表性州税。",
+        "间接税以7%的综合销售税估算。",
+        "企业社保负担约14.1%，涵盖FICA与失业保险。",
+        "默认折旧采用MACRS递减余额法，可根据需要设置额外加速折旧。"
+      ],
+      "depreciation": "MACRS 递减余额法"
+    },
+    "cn_standard": {
+      "label": "中国（一般增值税纳税人）",
+      "description": [
+        "企业所得税率为25%。",
+        "增值税率按制造业等标准13%设置。",
+        "企业社保负担估计为16%，覆盖养老、医疗、失业、工伤、生育保险。",
+        "默认折旧采用直线法，可根据政策启用加速折旧。"
+      ],
+      "depreciation": "直线法（可根据政策选择加速折旧）"
+    },
+    "kr_standard": {
+      "label": "韩国（中型企业模型）",
+      "description": [
+        "企业所得税率设为25%。",
+        "增值税率为10%。",
+        "企业社保负担约13%，涵盖国民年金、健康保险、雇佣保险与产业灾害保险。",
+        "默认折旧：建筑采用直线法，机器设备采用递减余额法。"
+      ],
+      "depreciation": "直线法 / 递减余额法"
+    }
+  },
+  "common": {
+    "language": "语言",
+    "tax_profile": "税制模型",
+    "update_settings": "更新设置",
+    "recommended": "推荐",
+    "video_label": "视频指南",
+    "faq_label": "常见问题",
+    "status": "状态"
+  }
+}

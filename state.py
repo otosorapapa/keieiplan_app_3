@@ -67,7 +67,9 @@ STATE_SPECS: Dict[str, StateSpec] = {
         lambda: {
             "unit": "百万円",
             "language": "ja",
+            "locale": "ja-JP",
             "currency": "JPY",
+            "tax_profile": "jp_sme",
             "fte": 20.0,
             "fiscal_year": 2025,
             "fiscal_year_start_month": 4,
