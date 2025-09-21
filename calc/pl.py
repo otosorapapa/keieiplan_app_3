@@ -31,12 +31,26 @@ getcontext().prec = 28
 class PlanConfig:
     """Holds calculation settings for the simplified contribution model."""
 
-    def __init__(self, base_sales: Decimal, fte: Decimal, unit: str) -> None:
+    def __init__(
+        self,
+        base_sales: Decimal,
+        fte: Decimal,
+        unit: str,
+        *,
+        currency: str = "JPY",
+        fiscal_year_start_month: int = 1,
+        forecast_years: int = 1,
+    ) -> None:
         self.base_sales = Decimal(base_sales)
         self.fte = Decimal(fte if fte else Decimal("0"))
         if self.fte <= 0:
             self.fte = Decimal("0.0001")
         self.unit = unit
+        self.currency = str(currency or "JPY").upper()
+        month = int(fiscal_year_start_month or 1)
+        self.fiscal_year_start_month = month if 1 <= month <= 12 else 1
+        years = int(forecast_years or 1)
+        self.forecast_years = years if years > 0 else 1
         self.items: Dict[str, Dict[str, object]] = {}
         self.sales_plan: SalesPlan | None = None
         self.cost_plan: CostPlan | None = None
@@ -68,7 +82,14 @@ class PlanConfig:
             self.set_amount(code, amount)
 
     def clone(self) -> "PlanConfig":
-        cloned = PlanConfig(self.base_sales, self.fte, self.unit)
+        cloned = PlanConfig(
+            self.base_sales,
+            self.fte,
+            self.unit,
+            currency=self.currency,
+            fiscal_year_start_month=self.fiscal_year_start_month,
+            forecast_years=self.forecast_years,
+        )
         cloned.items = {k: v.copy() for k, v in self.items.items()}
         cloned.sales_plan = self.sales_plan
         cloned.cost_plan = self.cost_plan
@@ -89,6 +110,9 @@ def plan_from_models(
     *,
     fte: Decimal,
     unit: str,
+    currency: str = "JPY",
+    fiscal_year_start_month: int = 1,
+    forecast_years: int = 1,
     working_capital: WorkingCapitalAssumptions | None = None,
 ) -> PlanConfig:
     """Build a :class:`PlanConfig` from typed models."""
@@ -97,7 +121,14 @@ def plan_from_models(
     _ = tax
 
     base_sales = sales.annual_total()
-    plan = PlanConfig(base_sales=base_sales, fte=fte, unit=unit)
+    plan = PlanConfig(
+        base_sales=base_sales,
+        fte=fte,
+        unit=unit,
+        currency=currency,
+        fiscal_year_start_month=fiscal_year_start_month,
+        forecast_years=forecast_years,
+    )
     plan.sales_plan = sales
     plan.cost_plan = costs
     plan.capex_plan = capex
@@ -228,6 +259,8 @@ def compute(
             base_sales=plan.base_sales,
             sales_override=sales_override,
             amount_overrides=amount_overrides,
+            start_month=plan.fiscal_year_start_month,
+            forecast_years=plan.forecast_years,
         )
         plan.latest_statements = statements
         amounts: Dict[str, Decimal] = {code: statements.annual_pl.get(code, Decimal("0")) for code, *_ in ITEMS}

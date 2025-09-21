@@ -53,6 +53,22 @@ class FinancialStatements:
     annual_cf: Dict[str, Decimal]
     annual_bs: Dict[str, Dict[str, Decimal]]
     loan_summary: LoanSummary
+    fiscal_year_start_month: int = 1
+    forecast_years: int = 1
+
+
+def _reorder_monthly_results(
+    statements: List[MonthlyStatement], start_month: int
+) -> List[MonthlyStatement]:
+    """Rotate monthly statements so the fiscal year starts at *start_month*."""
+
+    if not statements:
+        return statements
+    if start_month not in range(1, 13):
+        return statements
+    order = list(range(start_month, 13)) + list(range(1, start_month))
+    order_map = {month: index for index, month in enumerate(order)}
+    return sorted(statements, key=lambda stmt: order_map.get(stmt.month, stmt.month))
 
 
 def _loan_schedule_for_item(item: LoanItem) -> List[Dict[str, Decimal]]:
@@ -247,6 +263,8 @@ def build_financial_statements(
     base_sales: Decimal,
     sales_override: Decimal | None = None,
     amount_overrides: Mapping[str, Decimal] | None = None,
+    start_month: int = 1,
+    forecast_years: int = 1,
 ) -> FinancialStatements:
     monthly_sales = _monthly_sales(sales_plan)
     scale = Decimal("1")
@@ -462,12 +480,30 @@ def build_financial_statements(
         "totals": {"assets": Decimal("0"), "liabilities": Decimal("0")},
     }
 
+    try:
+        start_month_value = int(start_month)
+    except Exception:  # pragma: no cover - defensive fallback
+        start_month_value = 1
+    if start_month_value < 1 or start_month_value > 12:
+        start_month_value = 1
+
+    try:
+        forecast_years_value = int(forecast_years)
+    except Exception:  # pragma: no cover - defensive fallback
+        forecast_years_value = 1
+    if forecast_years_value <= 0:
+        forecast_years_value = 1
+
+    ordered_months = _reorder_monthly_results(monthly_results, start_month_value)
+
     return FinancialStatements(
-        monthly=monthly_results,
+        monthly=ordered_months,
         annual_pl=annual_pl,
         annual_cf=annual_cf,
         annual_bs=annual_bs,
         loan_summary=loan_summary,
+        fiscal_year_start_month=start_month_value,
+        forecast_years=forecast_years_value,
     )
 
 
