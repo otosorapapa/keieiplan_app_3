@@ -64,7 +64,15 @@ STATE_SPECS: Dict[str, StateSpec] = {
     "finance_raw": StateSpec(dict, dict, "財務入力フォームの生データ"),
     "finance_models": StateSpec(dict, dict, "検証済みの財務モデル"),
     "finance_settings": StateSpec(
-        lambda: {"unit": "百万円", "language": "ja", "fte": 20.0, "fiscal_year": 2025},
+        lambda: {
+            "unit": "百万円",
+            "language": "ja",
+            "currency": "JPY",
+            "fte": 20.0,
+            "fiscal_year": 2025,
+            "fiscal_year_start_month": 4,
+            "forecast_years": 3,
+        },
         dict,
         "共通設定（単位・言語・FTEなど）",
     ),
