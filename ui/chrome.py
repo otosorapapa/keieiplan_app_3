@@ -2,11 +2,22 @@ from __future__ import annotations
 
 from base64 import b64decode
 from dataclasses import dataclass
+from datetime import datetime
 from inspect import signature
 from pathlib import Path
 from typing import Callable, Dict
 
 import streamlit as st
+
+from state import (
+    create_state_backup,
+    delete_state_backup,
+    list_state_backups,
+    reset_analysis_parameters,
+    reset_app_state,
+    reset_input_data,
+    restore_state_backup,
+)
 
 APP_PAGE_TITLE = "経営計画スタジオ"
 APP_PAGE_ICON = "📊"
@@ -182,7 +193,7 @@ def render_app_header(
     subtitle: str,
     help_key: str = "show_usage_guide",
     help_button_label: str = "使い方ガイド",
-    reset_label: str = "Reset all",
+    reset_label: str = "既定値で再初期化",
     show_reset: bool = True,
     on_reset: Callable[[], None] | None = None,
 ) -> HeaderActions:
@@ -207,17 +218,93 @@ def render_app_header(
         if show_reset:
             reset_col = columns[2]
             with reset_col:
-                if st.button(
-                    reset_label,
-                    use_container_width=True,
-                    key="app_reset_all_button",
-                    help="入力値と分析結果を初期状態に戻します。",
-                ):
-                    reset_requested = True
-                    if on_reset is not None:
-                        on_reset()
+                _render_data_management_menu(on_reset=on_reset, label=reset_label)
 
     return HeaderActions(toggled_help=toggled_help, reset_requested=reset_requested)
+
+
+def _render_data_management_menu(
+    *, on_reset: Callable[[], None] | None, label: str
+) -> None:
+    """Render the backup and reset controls within a popover/expander."""
+
+    trigger = (
+        st.popover(label, use_container_width=True)
+        if hasattr(st, "popover")
+        else st.expander(label, expanded=False)
+    )
+    with trigger:
+        _render_backup_controls()
+        st.divider()
+        _render_reset_controls(on_reset=on_reset)
+
+
+def _render_backup_controls() -> None:
+    st.markdown("#### 💾 バックアップ")
+    if "header_backup_label" not in st.session_state:
+        st.session_state["header_backup_label"] = datetime.now().strftime(
+            "backup_%Y%m%d_%H%M%S"
+        )
+    label = st.text_input("バックアップ名", key="header_backup_label")
+    if st.button("バックアップを保存", key="header_create_backup", use_container_width=True):
+        entry = create_state_backup(label)
+        st.session_state["header_backup_label"] = datetime.now().strftime(
+            "backup_%Y%m%d_%H%M%S"
+        )
+        st.toast(f"バックアップ『{entry['label']}』を保存しました。", icon="💾")
+
+    backups = list_state_backups()
+    if backups:
+        options = {
+            f"{entry['label']} — {entry['created_at']}": entry["id"] for entry in backups
+        }
+        selected_label = st.selectbox(
+            "バックアップを選択",
+            list(options.keys()),
+            key="header_selected_backup",
+        )
+        selected_id = options[selected_label]
+        action_cols = st.columns(2)
+        if action_cols[0].button("復元", key="header_restore_backup", use_container_width=True):
+            if restore_state_backup(selected_id):
+                st.toast("バックアップから復元しました。", icon="↩️")
+                st.experimental_rerun()
+        if action_cols[1].button("削除", key="header_delete_backup", use_container_width=True):
+            if delete_state_backup(selected_id):
+                st.toast("バックアップを削除しました。", icon="🗑️")
+                st.experimental_rerun()
+    else:
+        st.caption("まだバックアップはありません。保存してから復元できます。")
+
+
+def _render_reset_controls(*, on_reset: Callable[[], None] | None) -> None:
+    st.markdown("#### ♻️ リセット")
+    options = {
+        "入力データのみ初期化": "inputs",
+        "分析パラメータのみ初期化": "analysis",
+        "全体を既定値で再初期化": "all",
+    }
+    if "header_reset_scope" not in st.session_state:
+        st.session_state["header_reset_scope"] = "inputs"
+    scope_label = st.radio(
+        "初期化する範囲",
+        list(options.keys()),
+        key="header_reset_scope",
+    )
+    if st.button("初期化を実行", key="header_apply_reset", use_container_width=True):
+        scope = options.get(scope_label, "inputs")
+        if scope == "inputs":
+            reset_input_data()
+            st.toast("入力データを初期化しました。", icon="🧹")
+        elif scope == "analysis":
+            reset_analysis_parameters()
+            st.toast("分析パラメータを初期化しました。", icon="🧠")
+        else:
+            reset_app_state(preserve={"state_backups"})
+            if on_reset is not None:
+                on_reset()
+            st.toast("アプリ全体を既定値に戻しました。", icon="🔄")
+        st.experimental_rerun()
 
 
 def render_usage_guide_panel(help_key: str = "show_usage_guide") -> None:
