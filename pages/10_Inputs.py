@@ -23,12 +23,9 @@ from sample_data import SAMPLE_FISCAL_YEAR, sample_sales_csv_bytes, sample_sales
 from state import ensure_session_defaults
 from theme import inject_theme
 from validators import ValidationIssue, validate_bundle
+from ui.chrome import apply_app_chrome
 
-st.set_page_config(
-    page_title="経営計画スタジオ｜Inputs",
-    page_icon="🧾",
-    layout="wide",
-)
+apply_app_chrome()
 
 inject_theme()
 ensure_session_defaults()

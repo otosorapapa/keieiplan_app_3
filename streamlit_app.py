@@ -1,4 +1,4 @@
-"""Streamlit entry point – forwards to the shared home page renderer."""
+"""Streamlit Cloud entry point for the Keieiplan app."""
 from __future__ import annotations
 
 from ui.chrome import apply_app_chrome

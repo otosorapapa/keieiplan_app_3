@@ -15,6 +15,7 @@ from calc import compute, plan_from_models, summarize_plan_metrics
 from formatting import UNIT_FACTORS, format_amount_with_unit, format_ratio, to_decimal
 from state import ensure_session_defaults, load_finance_bundle
 from theme import inject_theme
+from ui.chrome import apply_app_chrome
 
 
 PDF_UNIT_LABELS = {
@@ -75,11 +76,7 @@ def build_pdf_summary_lines(
         f"Break-even revenue: {format_amount_for_pdf(metrics.get('breakeven', Decimal('0')), unit)}",
     ]
 
-st.set_page_config(
-    page_title="経営計画スタジオ｜Report",
-    page_icon="📝",
-    layout="wide",
-)
+apply_app_chrome()
 
 inject_theme()
 ensure_session_defaults()
