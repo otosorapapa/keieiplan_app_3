@@ -8,6 +8,7 @@
     "localization": "언어 및 현지화",
     "dashboard": "대시보드",
     "data_entry": "데이터 입력",
+    "strategy": "전략 설정",
     "scenario": "시나리오·민감도 분석",
     "segment": "매장 / 부문 / 채널 분석",
     "funding": "보조금·금융 자료",
@@ -118,6 +119,10 @@
       "caption": "핵심 경영 지표를 한눈에 확인합니다.",
       "todo_header": "TODO",
       "todo_description": "주요 KPI 카드와 시각화를 추가해 주세요."
+    },
+    "strategy": {
+      "title": "전략 프레임워크 설정",
+      "caption": "BSC·PEST·SWOT 입력을 통합하여 대시보드와 보고서에 연동합니다."
     },
     "data_entry": {
       "title": "데이터 입력",

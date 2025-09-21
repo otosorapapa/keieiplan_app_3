@@ -11,6 +11,7 @@ from typing import Any, Dict, Mapping
 
 import pandas as pd
 
+from . import strategy as strategy_utils
 from models import (
     CapexPlan,
     CostPlan,
@@ -175,6 +176,7 @@ def prepare_finance_export_payload(
     working_capital: WorkingCapitalAssumptions,
     settings: Mapping[str, Any],
     metadata: Mapping[str, Any] | None = None,
+    strategy: Mapping[str, Any] | None = None,
 ) -> Dict[str, pd.DataFrame]:
     """Build a mapping of sheet name to DataFrame for export."""
 
@@ -209,6 +211,10 @@ def prepare_finance_export_payload(
         "tax": _tax_to_dataframe(tax),
         "working_capital": _working_capital_to_dataframe(working_capital),
     }
+    strategy_state = strategy or {}
+    payload["strategy_bsc"] = strategy_utils.bsc_to_dataframe(strategy_state.get("bsc", {}))
+    payload["strategy_pest"] = strategy_utils.pest_to_dataframe(strategy_state.get("pest", {}))
+    payload["strategy_swot"] = strategy_utils.swot_to_dataframe(strategy_state.get("swot", {}))
     return payload
 
 
@@ -454,6 +460,7 @@ def import_finance_payload(file: UploadedFile | None) -> tuple[dict[str, Any], l
         "tax": tax,
         "working_capital": working_capital,
     }
+    result["strategy"] = strategy_utils.frames_to_strategy(frames)
 
     return result, warnings
 

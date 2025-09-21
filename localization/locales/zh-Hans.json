@@ -8,6 +8,7 @@
     "localization": "语言与本地化",
     "dashboard": "仪表板",
     "data_entry": "数据录入",
+    "strategy": "战略设置",
     "scenario": "情景与敏感度分析",
     "segment": "门店 / 部门 / 渠道分析",
     "funding": "补贴与金融资料",
@@ -118,6 +119,10 @@
       "caption": "总览核心经营指标。",
       "todo_header": "待办",
       "todo_description": "请添加主要KPI的图表与卡片。"
+    },
+    "strategy": {
+      "title": "战略框架设置",
+      "caption": "录入BSC、PEST与SWOT并同步到仪表板与报告。"
     },
     "data_entry": {
       "title": "数据录入",

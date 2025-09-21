@@ -8,6 +8,7 @@
     "localization": "Language & Localization",
     "dashboard": "Dashboard",
     "data_entry": "Data Entry",
+    "strategy": "Strategy",
     "scenario": "Scenarios & Sensitivity",
     "segment": "Segment Performance",
     "funding": "Funding & Banking Docs",
@@ -118,6 +119,10 @@
       "caption": "Get a high-level overview of core performance metrics.",
       "todo_header": "TODO",
       "todo_description": "Add KPI cards and visualizations for the primary metrics."
+    },
+    "strategy": {
+      "title": "Strategy framework settings",
+      "caption": "Capture BSC, PEST and SWOT inputs and make them available on dashboards and reports."
     },
     "data_entry": {
       "title": "Data Entry",
