@@ -1,0 +1,220 @@
+{
+  "app": {
+    "page_title": "経営計画ダッシュボード",
+    "page_icon": "📊",
+    "footer": "© 経営計画策定WEBアプリ（Streamlit版） | 表示単位と計算単位を分離し、丸めの影響を最小化しています。"
+  },
+  "navigation": {
+    "localization": "言語とローカライズ",
+    "dashboard": "ダッシュボード",
+    "data_entry": "データ入力",
+    "scenario": "シナリオ & 感度分析",
+    "segment": "店舗 / 部門 / チャネル分析",
+    "funding": "補助金 / 金融機関資料",
+    "export": "エクスポート (PPTX / Excel)"
+  },
+  "languages": {
+    "status_labels": {
+      "stable": "安定版",
+      "beta": "ベータ版",
+      "preview": "プレビュー"
+    },
+    "status_messages": {
+      "beta": "英語UIはベータ版のため、一部の画面で未翻訳の項目が残っている可能性があります。",
+      "preview": "この言語はプレビュー提供中です。計算ロジックと翻訳の正確性をご確認ください。"
+    },
+    "ja": {
+      "label": "日本語",
+      "description": [
+        "国内向け中小企業での利用を想定した用語と帳票構成です。",
+        "会計・税務の計算は日本の制度に合わせて調整されています。"
+      ]
+    },
+    "en": {
+      "label": "English (US)",
+      "description": [
+        "Terminology aligned with US SMB financial statements.",
+        "Federal corporate tax and a representative state tax are preconfigured."
+      ]
+    },
+    "zh-Hans": {
+      "label": "简体字中文",
+      "description": [
+        "面向中国内地企业的表述正在逐步完善。",
+        "税制与社会保险参数基于国家税务总局公开值的试行设置。"
+      ]
+    },
+    "ko": {
+      "label": "한국어",
+      "description": [
+        "한국의 중견·중소기업 회계 용어에 맞춰 번역을 확대하고 있습니다.",
+        "세법과 사회보험 전제는 고용노동부 자료를 기반으로 시험 제공 중입니다."
+      ]
+    }
+  },
+  "guides": {
+    "button_label": "使い方ガイド",
+    "language": {
+      "overview": [
+        "選択した言語に応じてUIと用語が切り替わります。",
+        "英語版はベータ提供のため、一部の表記が暫定的です。"
+      ],
+      "video_url": "https://www.youtube.com/watch?v=ysz5S6PUM-U",
+      "faq": [
+        "**Q. 切り替え後に再起動は必要ですか?** → いいえ、設定保存後すぐに反映されます。",
+        "**Q. 翻訳の改善要望は?** → 設定ページ下部のフィードバックからお知らせください。"
+      ]
+    },
+    "tax": {
+      "overview": [
+        "国ごとの税制モデルは法人税率・消費税率・社会保険料率を含みます。",
+        "推奨モデルはUI言語に基づいて自動選択されますが、任意に変更できます。"
+      ],
+      "video_url": "https://www.youtube.com/watch?v=2LhoCfjm8R4",
+      "faq": [
+        "**Q. 州税はどこまで考慮されますか?** → 米国モデルでは代表的な州税率(5%)を上乗せしています。",
+        "**Q. 減価償却の方式は?** → 各国の中小企業向け税制で一般的な手法を初期値に設定しています。"
+      ]
+    },
+    "finance_settings": {
+      "overview": [
+        "単位・通貨・FTE設定は全ページで共有されます。",
+        "入力内容を変更した後は保存ボタンを押して反映してください。"
+      ],
+      "video_url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+      "faq": [
+        "**Q. FTEは自動計算できますか?** → 計算ツールから人数と勤務時間を入力すると反映できます。",
+        "**Q. 会計年度開始月の変更は?** → プルダウンから月を選択すると表示と計算が連動します。"
+      ]
+    }
+  },
+  "pages": {
+    "localization": {
+      "title": "言語とローカライズ",
+      "caption": "UI言語と税制モデルの組み合わせを管理します。",
+      "language_section_title": "UI言語の選択",
+      "language_section_caption": "ページの表示言語と用語セットを切り替えます。",
+      "tax_section_title": "会計・法制度モデル",
+      "tax_section_caption": "法人税率や消費税、社会保険料の前提を国別に切り替えます。",
+      "status_overview_title": "提供ステータス",
+      "status_overview_caption": "各言語の安定度と注意事項を確認できます。",
+      "recommended_tax_profile": "推奨モデル: {profile}",
+      "submit_label": "設定を保存",
+      "success_message": "言語と税制設定を更新しました。",
+      "language_table_header": "利用可能なUI言語",
+      "tax_profile_details": "税制モデルの概要",
+      "sync_hint": "言語切り替え後は必要に応じて税制モデルも見直してください。",
+      "beta_panel_title": "ステータス詳細",
+      "feedback_prompt": "翻訳や制度ロジックの改善要望はサポート窓口までお寄せください。",
+      "tax_detail_headers": {
+        "corporate_tax": "法人税率",
+        "consumption_tax": "消費税 / 間接税率",
+        "social_insurance": "社会保険料率(目安)",
+        "depreciation": "減価償却の初期設定"
+      }
+    },
+    "dashboard": {
+      "title": "ダッシュボード",
+      "caption": "経営指標の俯瞰ビューを提供します。",
+      "todo_header": "TODO",
+      "todo_description": "主要なチャートやKPIカードを追加してください。"
+    },
+    "data_entry": {
+      "title": "データ入力",
+      "caption": "財務諸表や前提条件をアップロードまたは手入力します。",
+      "file_uploader_label": "財務データファイル",
+      "file_loaded": "ファイルが読み込まれました。",
+      "manual_form_label": "手動入力フォーム",
+      "manual_form_placeholder": "売上・費用・投資などの入力フォームを配置します。",
+      "validation_warning": "入力内容の確認が必要です。",
+      "validation_success": "入力値の整合性チェックに通過しました。",
+      "guide": [
+        "ExcelやCSVを読み込むと自動検証が行われます。",
+        "手動フォームは今後のアップデートで拡充されます。"
+      ],
+      "guide_video": "https://www.youtube.com/watch?v=oHg5SJYRHA0",
+      "guide_faq": [
+        "**Q. CSVの文字コードは?** → UTF-8を推奨しています。",
+        "**Q. サンプルデータはありますか?** → ホームタブのサンプル適用ボタンから利用できます。"
+      ]
+    },
+    "scenario": {
+      "title": "シナリオ & 感度分析",
+      "caption": "複数シナリオと感度分析の結果を比較します。",
+      "scenario_table": "シナリオ一覧",
+      "todo": "売上・費用の仮定を変更するためのUIコンポーネントを追加してください。"
+    },
+    "segment": {
+      "title": "店舗 / 部門 / チャネル分析",
+      "caption": "セグメント別の業績とKPIを可視化します。",
+      "todo": "セグメント別の指標を編集するUIを追加してください。"
+    },
+    "funding": {
+      "title": "補助金 / 金融機関資料",
+      "caption": "補助金申請や金融機関向け資料のアウトラインを準備します。",
+      "summary_header": "資金計画サマリー",
+      "template_header": "申請書テンプレート",
+      "template_placeholder": "補助金・融資に必要なドキュメント構成を追加してください。",
+      "checklist_title": "提出前チェック項目"
+    },
+    "export": {
+      "title": "エクスポート (PPTX / Excel)",
+      "caption": "経営計画の成果物をエクスポートします。",
+      "ready_state": "エクスポート可能な状態",
+      "download_excel": "Excelをダウンロード",
+      "download_pptx": "PPTXをダウンロード",
+      "todo": "ダウンロード処理の実装は core/exporters.py に記述してください。"
+    }
+  },
+  "tax_profiles": {
+    "jp_sme": {
+      "label": "日本（中小企業向け標準）",
+      "description": [
+        "法人税率は23.2%（中小企業軽減税率を考慮した加重平均）。",
+        "消費税率は10%で、免税事業者の簡易課税を想定しています。",
+        "社会保険料率は厚生年金・健康保険の事業主負担を合算した概算15%。",
+        "減価償却は定額法（建物・設備）と定率法（機械）を初期値とします。"
+      ],
+      "depreciation": "定額法（建物・設備） / 定率法（機械）"
+    },
+    "us_standard": {
+      "label": "米国（中小企業・州税考慮）",
+      "description": [
+        "法人税率は21%の連邦税に代表的な州税5%を加算した想定です。",
+        "消費税の代替として平均的な売上税率7%を適用しています。",
+        "社会保険料率はFICA・失業保険の雇用主負担を合算した概算14.1%。",
+        "減価償却はMACRS（定率法）を前提に、ボーナス減価償却は個別設定です。"
+      ],
+      "depreciation": "MACRS（定率法ベース）"
+    },
+    "cn_standard": {
+      "label": "中国（一般課税企業）",
+      "description": [
+        "法人税率は25%（一般企業向け）。",
+        "付加価値税率は製造業などの標準13%を想定しています。",
+        "社会保険料率は年金・医療・失業・工傷・生育の雇用主負担を合算した概算16%。",
+        "減価償却は直線法を基本に、加速償却は政策減税に応じて個別設定します。"
+      ],
+      "depreciation": "直線法（政策適用時に加速償却）"
+    },
+    "kr_standard": {
+      "label": "韓国（中堅企業モデル）",
+      "description": [
+        "法人税率は25%（課税所得区分に基づく標準税率）。",
+        "付加価値税率は10%。",
+        "社会保険料率は国民年金・健康保険・雇用保険・産業災害保険を合算した概算13%。",
+        "減価償却は定額法（建物）と定率法（機械設備）を初期設定とします。"
+      ],
+      "depreciation": "定額法 / 定率法の併用"
+    }
+  },
+  "common": {
+    "language": "言語",
+    "tax_profile": "税制モデル",
+    "update_settings": "設定を更新",
+    "recommended": "推奨",
+    "video_label": "動画ガイド",
+    "faq_label": "FAQ",
+    "status": "ステータス"
+  }
+}

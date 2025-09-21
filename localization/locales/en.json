@@ -1,0 +1,220 @@
+{
+  "app": {
+    "page_title": "Keieiplan Dashboard",
+    "page_icon": "📊",
+    "footer": "© Keieiplan Planning App (Streamlit Edition) | Display units are decoupled from calculation units to minimize rounding differences."
+  },
+  "navigation": {
+    "localization": "Language & Localization",
+    "dashboard": "Dashboard",
+    "data_entry": "Data Entry",
+    "scenario": "Scenarios & Sensitivity",
+    "segment": "Segment Performance",
+    "funding": "Funding & Banking Docs",
+    "export": "Export (PPTX / Excel)"
+  },
+  "languages": {
+    "status_labels": {
+      "stable": "Stable",
+      "beta": "Beta",
+      "preview": "Preview"
+    },
+    "status_messages": {
+      "beta": "The English UI is in beta; some labels may still appear in Japanese.",
+      "preview": "This language pack is a preview. Please verify terminology and calculation rules before sharing."
+    },
+    "ja": {
+      "label": "日本語",
+      "description": [
+        "Optimized for Japanese SMB terminology and document formats.",
+        "Tax and statutory logic follows Japanese domestic rules."
+      ]
+    },
+    "en": {
+      "label": "English (US)",
+      "description": [
+        "Terminology aligned with US GAAP-oriented SMB planning.",
+        "Defaults include federal corporate tax and a representative state tax assumption."
+      ]
+    },
+    "zh-Hans": {
+      "label": "简体字中文",
+      "description": [
+        "Chinese Mainland terminology is being rolled out incrementally.",
+        "Tax and social insurance assumptions follow pilot values from the State Taxation Administration."
+      ]
+    },
+    "ko": {
+      "label": "한국어",
+      "description": [
+        "Korean translations focus on medium-sized enterprise usage and statutory wording.",
+        "Tax and social security presets are derived from Ministry of Employment and Labor references."
+      ]
+    }
+  },
+  "guides": {
+    "button_label": "How to",
+    "language": {
+      "overview": [
+        "Switching languages updates UI labels and scenario terminology instantly.",
+        "The English pack is still in beta; expect iterative improvements."
+      ],
+      "video_url": "https://www.youtube.com/watch?v=ysz5S6PUM-U",
+      "faq": [
+        "**Q. Do I need to restart after changing the language?** → No. The change applies immediately once saved.",
+        "**Q. Where can I request translation updates?** → Use the feedback link at the bottom of this settings page."
+      ]
+    },
+    "tax": {
+      "overview": [
+        "Each tax model covers corporate tax, indirect tax, and employer social security assumptions.",
+        "A recommended model is suggested from the selected UI language but can be overridden."
+      ],
+      "video_url": "https://www.youtube.com/watch?v=2LhoCfjm8R4",
+      "faq": [
+        "**Q. How are state taxes handled?** → The US profile adds a representative 5% state tax on top of the federal rate.",
+        "**Q. Which depreciation method is assumed?** → Default methods mirror commonly used SME tax practices per country."
+      ]
+    },
+    "finance_settings": {
+      "overview": [
+        "Unit, currency, and FTE preferences are shared across the entire app.",
+        "Click the save button after editing to propagate updates to all tabs."
+      ],
+      "video_url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+      "faq": [
+        "**Q. Can I auto-calculate FTE?** → Use the calculator to input headcount and weekly hours, then apply the result.",
+        "**Q. How do I change the fiscal year start month?** → Pick the month from the dropdown; calculations will follow the selection."
+      ]
+    }
+  },
+  "pages": {
+    "localization": {
+      "title": "Language & Localization",
+      "caption": "Manage UI languages alongside tax and statutory presets.",
+      "language_section_title": "Select UI Language",
+      "language_section_caption": "Switch displayed terminology and labels per language pack.",
+      "tax_section_title": "Accounting & Statutory Model",
+      "tax_section_caption": "Choose corporate tax, indirect tax, and social insurance assumptions per country.",
+      "status_overview_title": "Availability Status",
+      "status_overview_caption": "Review the stability level and caveats for each language.",
+      "recommended_tax_profile": "Recommended model: {profile}",
+      "submit_label": "Save settings",
+      "success_message": "Language and localization settings updated successfully.",
+      "language_table_header": "Supported UI Languages",
+      "tax_profile_details": "Tax Model Overview",
+      "sync_hint": "Review the tax model whenever you switch the language pack.",
+      "beta_panel_title": "Status details",
+      "feedback_prompt": "Share translation or statutory logic feedback with the support team.",
+      "tax_detail_headers": {
+        "corporate_tax": "Corporate tax rate",
+        "consumption_tax": "Indirect tax / VAT",
+        "social_insurance": "Employer social security",
+        "depreciation": "Default depreciation"
+      }
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "caption": "Get a high-level overview of core performance metrics.",
+      "todo_header": "TODO",
+      "todo_description": "Add KPI cards and visualizations for the primary metrics."
+    },
+    "data_entry": {
+      "title": "Data Entry",
+      "caption": "Upload financial statements or enter assumptions manually.",
+      "file_uploader_label": "Financial data file",
+      "file_loaded": "File imported successfully.",
+      "manual_form_label": "Manual input form",
+      "manual_form_placeholder": "Add detailed input widgets for revenue, costs, and investments here.",
+      "validation_warning": "Input review required.",
+      "validation_success": "All validations passed.",
+      "guide": [
+        "Upload Excel or CSV files to trigger automatic validation.",
+        "Manual forms will be expanded in upcoming releases."
+      ],
+      "guide_video": "https://www.youtube.com/watch?v=oHg5SJYRHA0",
+      "guide_faq": [
+        "**Q. Which CSV encoding is supported?** → UTF-8 is recommended.",
+        "**Q. Is sample data available?** → Yes. Use the sample data action on the home tab."
+      ]
+    },
+    "scenario": {
+      "title": "Scenarios & Sensitivity",
+      "caption": "Compare scenario outputs and sensitivity results side by side.",
+      "scenario_table": "Scenario list",
+      "todo": "Add UI controls to adjust revenue and cost assumptions per scenario."
+    },
+    "segment": {
+      "title": "Segment Performance",
+      "caption": "Visualize KPIs by store, department, or channel.",
+      "todo": "Provide UI elements to edit segment-level metrics."
+    },
+    "funding": {
+      "title": "Funding & Banking Docs",
+      "caption": "Draft subsidy applications and lender-ready documentation.",
+      "summary_header": "Funding summary",
+      "template_header": "Application templates",
+      "template_placeholder": "Add the document outlines required for subsidies and loans.",
+      "checklist_title": "Pre-submission checklist"
+    },
+    "export": {
+      "title": "Export (PPTX / Excel)",
+      "caption": "Export your planning outputs for sharing.",
+      "ready_state": "Ready for export",
+      "download_excel": "Download Excel",
+      "download_pptx": "Download PPTX",
+      "todo": "Implement the export logic in core/exporters.py."
+    }
+  },
+  "tax_profiles": {
+    "jp_sme": {
+      "label": "Japan (SMB baseline)",
+      "description": [
+        "Corporate tax rate of 23.2% reflecting SME relief brackets.",
+        "Consumption tax at 10% assuming the simplified taxable enterprise regime.",
+        "Employer social security estimated at 15% (pension and health contributions).",
+        "Default depreciation applies straight-line for buildings and declining balance for machinery."
+      ],
+      "depreciation": "Straight-line (buildings/equipment) / Declining balance (machinery)"
+    },
+    "us_standard": {
+      "label": "United States (SMB with state tax)",
+      "description": [
+        "Corporate tax assumes 21% federal plus 5% representative state rate.",
+        "Indirect tax approximated via a 7% blended sales tax.",
+        "Employer social security combines FICA and unemployment contributions for an estimated 14.1%.",
+        "Default depreciation follows MACRS (declining balance) with optional bonus depreciation adjustments."
+      ],
+      "depreciation": "MACRS (declining balance baseline)"
+    },
+    "cn_standard": {
+      "label": "China (general VAT payer)",
+      "description": [
+        "Corporate tax rate set to 25% for general enterprises.",
+        "VAT rate of 13% based on the standard manufacturing bracket.",
+        "Employer social insurance estimated at 16% covering pension, medical, unemployment, injury, and maternity funds.",
+        "Default depreciation uses straight-line with optional accelerated rules for incentive programs."
+      ],
+      "depreciation": "Straight-line (accelerated depreciation optional)"
+    },
+    "kr_standard": {
+      "label": "Korea (mid-sized enterprise)",
+      "description": [
+        "Corporate tax rate of 25% for the mid-tier taxable income bracket.",
+        "VAT rate of 10%.",
+        "Employer social security estimated at 13% covering pension, health, employment, and industrial accident insurance.",
+        "Default depreciation applies straight-line for buildings and declining balance for machinery and equipment."
+      ],
+      "depreciation": "Straight-line / Declining balance"
+    }
+  },
+  "common": {
+    "language": "Language",
+    "tax_profile": "Tax model",
+    "update_settings": "Update settings",
+    "recommended": "Recommended",
+    "video_label": "Video guide",
+    "faq_label": "FAQ",
+    "status": "Status"
+  }
+}
