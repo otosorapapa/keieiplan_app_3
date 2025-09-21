@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from base64 import b64decode
 from dataclasses import dataclass
+from inspect import signature
 from pathlib import Path
 from typing import Callable, Dict
 
@@ -21,6 +22,8 @@ LOGO_ALT_TEXT = "経営計画スタジオのロゴ"
 PLACEHOLDER_LOGO_BYTES = b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII="
 )
+
+_LOGO_SUPPORTS_ALT = "alt" in signature(st.logo).parameters
 
 ENVIRONMENT_SETTINGS_KEY = "environment_settings"
 ENVIRONMENT_DEFAULTS: Dict[str, float | int | str] = {
@@ -75,13 +78,24 @@ def _render_logo() -> None:
             }
         else:
             logo_source = str(LOGO_LIGHT_PATH)
-        st.logo(logo_source, icon_image=str(LOGO_LIGHT_PATH), alt=LOGO_ALT_TEXT)
+        _display_logo(logo_source, icon_image=str(LOGO_LIGHT_PATH))
     except FileNotFoundError:
-        st.logo(PLACEHOLDER_LOGO_BYTES, alt=LOGO_ALT_TEXT)
+        _display_logo(PLACEHOLDER_LOGO_BYTES)
         st.sidebar.info("assets/logo.png を配置するとブランドロゴが表示されます。")
     except Exception as exc:  # pragma: no cover - defensive UI feedback
-        st.logo(PLACEHOLDER_LOGO_BYTES, alt=LOGO_ALT_TEXT)
+        _display_logo(PLACEHOLDER_LOGO_BYTES)
         st.sidebar.warning(f"ロゴを読み込めませんでした: {exc}")
+
+
+def _display_logo(image: str | Dict[str, str] | bytes, *, icon_image: str | None = None) -> None:
+    """Render the logo while gracefully handling optional keyword support."""
+
+    logo_kwargs: Dict[str, str] = {}
+    if icon_image is not None:
+        logo_kwargs["icon_image"] = icon_image
+    if _LOGO_SUPPORTS_ALT:
+        logo_kwargs["alt"] = LOGO_ALT_TEXT
+    st.logo(image, **logo_kwargs)
 
 
 def _render_environment_sidebar() -> None:
