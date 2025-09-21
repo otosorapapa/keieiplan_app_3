@@ -21,6 +21,7 @@ from calc import (
 from formatting import format_amount_with_unit, format_ratio
 from state import ensure_session_defaults, load_finance_bundle
 from theme import inject_theme
+from ui.chrome import apply_app_chrome
 
 ITEM_LABELS = {code: label for code, label, _ in ITEMS}
 
@@ -188,11 +189,7 @@ def build_dscr_timeseries(statements: FinancialStatements) -> pd.DataFrame:
         )
     return pd.DataFrame(grouped_rows)
 
-st.set_page_config(
-    page_title="経営計画スタジオ｜Analysis",
-    page_icon="📈",
-    layout="wide",
-)
+apply_app_chrome()
 
 inject_theme()
 ensure_session_defaults()
