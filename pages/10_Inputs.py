@@ -142,13 +142,14 @@ def _yen_number_input(
     key: str | None = None,
 ) -> float:
     # ``st.number_input`` in Streamlit 1.49+ rejects printf-style format strings
-    # that prefix currency symbols (e.g. ``¥``).  We therefore use a plain
+    # that prefix currency symbols (e.g. ``¥``) *and* those that include
+    # thousands separators (e.g. ``%,.0f``).  We therefore stick to a plain
     # numeric format while keeping the unit in the label itself.
     kwargs = {
         "min_value": float(min_value),
         "step": float(step),
         "value": float(value),
-        "format": "%,.0f",
+        "format": "%.0f",
     }
     if max_value is not None:
         kwargs["max_value"] = float(max_value)
@@ -366,7 +367,7 @@ with sales_tab:
         sales_df = st.session_state[SALES_TEMPLATE_STATE_KEY]
         month_columns_config = {
             month: st.column_config.NumberColumn(
-                month, min_value=0.0, step=1.0, format="%,.0f"
+                month, min_value=0.0, step=1.0, format="%.0f"
             )
             for month in MONTH_COLUMNS
         }
@@ -520,7 +521,7 @@ with invest_tab:
         use_container_width=True,
         column_config={
             "金額": st.column_config.NumberColumn(
-                "金額 (円)", min_value=0.0, step=1_000_000.0, format="%,.0f"
+                "金額 (円)", min_value=0.0, step=1_000_000.0, format="%.0f"
             ),
             "開始月": st.column_config.NumberColumn("開始月", min_value=1, max_value=12, step=1),
             "耐用年数": st.column_config.NumberColumn("耐用年数 (年)", min_value=1, max_value=20, step=1),
@@ -535,7 +536,7 @@ with invest_tab:
         use_container_width=True,
         column_config={
             "元本": st.column_config.NumberColumn(
-                "元本 (円)", min_value=0.0, step=1_000_000.0, format="%,.0f"
+                "元本 (円)", min_value=0.0, step=1_000_000.0, format="%.0f"
             ),
             "金利": st.column_config.NumberColumn(
                 "金利 (小数)",
