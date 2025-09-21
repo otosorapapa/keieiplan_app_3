@@ -9,7 +9,7 @@ import streamlit as st
 
 from calc import compute, plan_from_models, summarize_plan_metrics
 from formatting import format_amount_with_unit, format_ratio
-from state import ensure_session_defaults, load_finance_bundle, reset_app_state
+from state import ensure_session_defaults, load_finance_bundle
 from sample_data import (
     SAMPLE_FISCAL_YEAR,
     apply_sample_data_to_session,
@@ -249,10 +249,6 @@ def render_home_page() -> None:
         title="経営計画スタジオ",
         subtitle="入力→分析→シナリオ→レポートをワンストップで。型安全な計算ロジックで意思決定をサポートします。",
     )
-
-    if header_actions.reset_requested:
-        reset_app_state()
-        st.experimental_rerun()
 
     if header_actions.toggled_help:
         st.session_state["show_usage_guide"] = not st.session_state.get("show_usage_guide", False)

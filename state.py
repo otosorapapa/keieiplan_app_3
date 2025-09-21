@@ -1,8 +1,11 @@
 """Utilities for managing Streamlit session state defaults and resets."""
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, Mapping, Tuple
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -78,7 +81,37 @@ STATE_SPECS: Dict[str, StateSpec] = {
         dict,
         "共通設定（単位・言語・FTEなど）",
     ),
+    "state_backups": StateSpec(list, list, "セッションスナップショット"),
+    "industry_template_state": StateSpec(dict, dict, "業種テンプレート設定"),
 }
+
+
+INPUT_STATE_KEYS: Tuple[str, ...] = (
+    "finance_raw",
+    "finance_models",
+    "overrides",
+    "sample_data_loaded",
+    "last_updated_ts",
+    "validation_status",
+)
+
+ANALYSIS_STATE_KEYS: Tuple[str, ...] = (
+    "sensitivity_zoom_mode",
+    "sensitivity_current",
+    "kpi_history",
+    "metrics_timeline",
+    "scenario_df",
+    "scenario_editor",
+    "scenarios",
+    "what_if_presets",
+    "what_if_scenarios",
+    "what_if_default_quantity",
+    "what_if_default_customers",
+    "what_if_product_share",
+    "what_if_active",
+)
+
+_BACKUP_EXCLUDE_KEYS: Tuple[str, ...] = ("state_backups",)
 
 
 def ensure_session_defaults(overrides: Mapping[str, Any] | None = None) -> None:
@@ -149,11 +182,98 @@ def load_finance_bundle() -> Tuple[FinanceBundle, bool]:
     return default_bundle, False
 
 
+def capture_session_snapshot(keys: Iterable[str] | None = None) -> Dict[str, Any]:
+    """Return a deep-copied snapshot of selected session state entries."""
+
+    target_keys = list(keys) if keys is not None else [
+        key for key in STATE_SPECS.keys() if key not in _BACKUP_EXCLUDE_KEYS
+    ]
+    snapshot: Dict[str, Any] = {}
+    for key in target_keys:
+        if key in st.session_state:
+            try:
+                snapshot[key] = deepcopy(st.session_state[key])
+            except Exception:  # pragma: no cover - fallback for uncopyable objects
+                snapshot[key] = st.session_state[key]
+    return snapshot
+
+
+def list_state_backups() -> list[Dict[str, Any]]:
+    """Return stored session backups as a list of dictionaries."""
+
+    backups = st.session_state.get("state_backups", [])
+    if isinstance(backups, list):
+        return backups
+    return []
+
+
+def create_state_backup(label: str) -> Dict[str, Any]:
+    """Create a new backup snapshot with *label* and store it in the session."""
+
+    ensure_session_defaults()
+    entry = {
+        "id": str(uuid4()),
+        "label": str(label).strip() or "unnamed",
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "snapshot": capture_session_snapshot(),
+    }
+    backups = list(list_state_backups())
+    backups.insert(0, entry)
+    st.session_state["state_backups"] = backups[:10]
+    return entry
+
+
+def restore_state_backup(backup_id: str) -> bool:
+    """Restore session state from the backup identified by *backup_id*."""
+
+    for entry in list_state_backups():
+        if entry.get("id") == backup_id:
+            snapshot = entry.get("snapshot", {})
+            reset_app_state(preserve={"state_backups"})
+            for key, value in snapshot.items():
+                try:
+                    st.session_state[key] = deepcopy(value)
+                except Exception:  # pragma: no cover - fallback for uncopyable objects
+                    st.session_state[key] = value
+            return True
+    return False
+
+
+def delete_state_backup(backup_id: str) -> bool:
+    """Remove the backup identified by *backup_id* from storage."""
+
+    backups = list(list_state_backups())
+    filtered = [entry for entry in backups if entry.get("id") != backup_id]
+    if len(filtered) != len(backups):
+        st.session_state["state_backups"] = filtered
+        return True
+    return False
+
+
+def reset_input_data() -> None:
+    """Reset finance-related session entries to their defaults."""
+
+    reset_session_keys(INPUT_STATE_KEYS)
+
+
+def reset_analysis_parameters() -> None:
+    """Reset scenario and analysis related state entries."""
+
+    reset_session_keys(ANALYSIS_STATE_KEYS)
+
+
 __all__ = [
     "StateSpec",
     "STATE_SPECS",
     "ensure_session_defaults",
     "reset_session_keys",
     "reset_app_state",
+    "reset_input_data",
+    "reset_analysis_parameters",
+    "capture_session_snapshot",
+    "list_state_backups",
+    "create_state_backup",
+    "restore_state_backup",
+    "delete_state_backup",
     "load_finance_bundle",
 ]
